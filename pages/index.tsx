@@ -89,12 +89,11 @@ export default function Home() {
     setIsLoading(true);
     setStreamingContent('');
 
-    // Track refinements in phase 4
-    if (phase === 3 || phase === 4) {
+    // Track refinements only in phase 4 (after itinerary delivered)
+    if (phase === 4) {
       const newCount = refinementCount + 1;
       setRefinementCount(newCount);
-      setPhase(4);
-      
+
       if (newCount > MAX_REFINEMENTS) {
         setMessages(prev => [
           ...prev,
@@ -200,10 +199,10 @@ export default function Home() {
             {isRefinementPhase && (
               <div className="text-right">
                 <div className="text-xs text-mist font-body" style={{ fontSize: '0.65rem', letterSpacing: '0.06em' }}>
-                  Refinements
+                  Refinements used
                 </div>
                 <div className="font-display text-lg text-gold">
-                  {refinementsLeft}
+                  {refinementCount}
                   <span className="text-mist text-sm font-body font-light"> / {MAX_REFINEMENTS}</span>
                 </div>
               </div>
