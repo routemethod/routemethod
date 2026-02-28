@@ -1,0 +1,172 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=Jost:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: 'Cormorant Garamond', serif;
+  --font-body: 'Jost', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: #F7F5F0;
+  color: #0E0E0E;
+  font-family: var(--font-body);
+  font-weight: 300;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #F7F5F0;
+}
+::-webkit-scrollbar-thumb {
+  background: #C9A96E;
+  border-radius: 2px;
+}
+
+/* Itinerary rendered output styles */
+.itinerary-output h1 {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 400;
+  color: #0E0E0E;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.itinerary-output h2 {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: #2C3E50;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #C9A96E;
+  letter-spacing: 0.04em;
+}
+
+.itinerary-output h3 {
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #C9A96E;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+}
+
+.itinerary-output p {
+  font-size: 0.9rem;
+  line-height: 1.75;
+  color: #2C3E50;
+  margin-bottom: 0.5rem;
+}
+
+.itinerary-output ul {
+  list-style: none;
+  padding: 0;
+  margin-bottom: 0.75rem;
+}
+
+.itinerary-output ul li {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  color: #2C3E50;
+  padding-left: 1rem;
+  position: relative;
+}
+
+.itinerary-output ul li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: #C9A96E;
+  font-size: 0.75rem;
+}
+
+.itinerary-output strong {
+  font-weight: 500;
+  color: #0E0E0E;
+}
+
+.itinerary-output em {
+  font-style: italic;
+  color: #8C9BAB;
+  font-size: 0.85rem;
+}
+
+/* Prose for chat messages */
+.prose-chat p {
+  margin-bottom: 0.75rem;
+  line-height: 1.75;
+}
+
+.prose-chat ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.prose-chat ul li {
+  padding-left: 1.25rem;
+  position: relative;
+  margin-bottom: 0.35rem;
+  line-height: 1.65;
+}
+
+.prose-chat ul li::before {
+  content: '—';
+  position: absolute;
+  left: 0;
+  color: #C9A96E;
+}
+
+.prose-chat ol {
+  list-style: none;
+  padding: 0;
+  counter-reset: list-counter;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.prose-chat ol li {
+  counter-increment: list-counter;
+  padding-left: 1.5rem;
+  position: relative;
+  margin-bottom: 0.5rem;
+  line-height: 1.65;
+}
+
+.prose-chat ol li::before {
+  content: counter(list-counter) '.';
+  position: absolute;
+  left: 0;
+  color: #C9A96E;
+  font-weight: 500;
+}
+
+.prose-chat strong {
+  font-weight: 500;
+  color: #0E0E0E;
+}
+
+.prose-chat em {
+  font-style: italic;
+  color: #8C9BAB;
+}
