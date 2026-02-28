@@ -1,11 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { NextApiRequest, NextApiResponse } from 'next';
 import { ROUTEMETHOD_SYSTEM_PROMPT } from '../../lib/prompt';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-export default async function handler(req, res) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
