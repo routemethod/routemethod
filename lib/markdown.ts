@@ -38,8 +38,8 @@ export function renderMarkdown(text: string): string {
   });
 
   // Ordered lists — sequential counter
+  html = html.replace(/^\d+\. (.+)$/gm, '<li-o>$1</li-o>');
   html = html.replace(/(<li-o>[\s\S]*?<\/li-o>\n?)+/g, (m) => {
-  html = html.replace(/(<li-o>.*?<\/li-o>\n?)+/gs, (m) => {
     const items = m.replace(/<li-o>(.*?)<\/li-o>/g, '<li>$1</li>');
     return `<ol>${items}</ol>`;
   });
@@ -107,7 +107,4 @@ export function extractDayAssignments(itineraryText: string): Record<string, str
   }
 
   return assignments;
-}
-export function isItinerary(text: string): boolean {
-  return text.includes('## Day') || (text.includes('### Morning') && text.includes('### Evening'));
 }
