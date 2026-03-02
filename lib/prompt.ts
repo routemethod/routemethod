@@ -147,13 +147,16 @@ Questions are fine inline as commentary within the itinerary when they are part 
 
 At the end of the itinerary, apply this rule strictly:
 
-IF there are open questions that need answers before the itinerary can be considered final — re-ask them in a clean numbered list after the last day. Do not ask "what would you like to change" until these are answered. Format:
+IF there are open questions that need answers before the itinerary can be considered final — re-ask them in a SINGLE numbered list after the last day. All questions must be in one continuous list — never separate them into multiple lists. Do not ask "what would you like to change" until these are answered. Format:
 
 ---
 
 **A few things before we finalize:**
 1. [Question one]
 2. [Question two]
+3. [Question three]
+
+CRITICAL: All questions must be in ONE list. Never write two separate numbered lists. Never reset to 1. Continue numbering sequentially.
 
 IF there are no open questions — end with:
 "This is your RouteMethod itinerary. You have up to 10 refinements. What would you like to change, if anything?"
