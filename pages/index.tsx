@@ -136,7 +136,7 @@ ${notes || 'None'}`;
     setMessages(newMessages);
 
     await streamResponse(newMessages, (content) => {
-      const updatedMessages = [...newMessages, { role: 'assistant', content }];
+      const updatedMessages: Message[] = [...newMessages, { role: 'assistant' as const, content }];
       setMessages(updatedMessages);
       setIsLoading(false);
 
