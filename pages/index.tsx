@@ -46,9 +46,14 @@ function parsePlaces(raw: string): PlaceItem[] {
 
   return lines.filter(Boolean).map(s => {
     const isLink = /^https?:\/\//.test(s);
-    const bracketMatch = s.match(/^([^\[]+)\[([^\]]+)\]/);
-    if (bracketMatch) return { name: bracketMatch[1].trim(), notes: bracketMatch[2].trim(), isLink };
-    return { name: isLink ? s : s, isLink };
+    // Extract notes from brackets/parens but store name clean (no brackets at all)
+    const cleanName = s
+      .replace(/\s*\[[^\]]*\]/g, '')   // remove [anything]
+      .replace(/\s*\([^)]*\)/g, '')    // remove (anything)
+      .trim();
+    const bracketMatch = s.match(/\[([^\]]+)\]/);
+    const notes = bracketMatch ? bracketMatch[1].trim() : undefined;
+    return { name: isLink ? s : cleanName, notes, isLink };
   });
 }
 
@@ -166,7 +171,7 @@ Additional Notes: ${notes || 'None'}`;
       destination, arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
       departure: `${departureDate}${departureTime ? ' at ' + departureTime : ''}`,
       hotel: `${hotelName}${hotelNeighborhood ? ', ' + hotelNeighborhood : ''}`,
-      pace, budget,
+      pace, budget: budget.join(', '),
       mustDos: parsePlaces(mustDos), restaurants: parsePlaces(restaurants),
       cafes: parsePlaces(cafes), bars: parsePlaces(bars),
       activities: parsePlaces(activities), niceToHaves: parsePlaces(niceToHaves),
@@ -304,8 +309,7 @@ Additional Notes: ${notes || 'None'}`;
             return (
               <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
                 <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>
-                <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name.replace(/\s*[\[\(][^\]\)]*[\]\)]\s*/g, '').trim()}</span>
-                {item.notes && <span style={{ color: 'var(--color-mist)', fontSize: '0.7rem' }}> [{item.notes}]</span>}
+                <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name}</span>
                 {dayTag && <span style={{ marginLeft: '6px', fontSize: '0.6rem', color: 'var(--color-accent)', fontWeight: 500 }}>{dayTag}</span>}
               </li>
             );
