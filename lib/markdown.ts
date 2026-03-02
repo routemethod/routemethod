@@ -37,12 +37,20 @@ export function renderMarkdown(text: string): string {
     return `<ul>${items}</ul>`;
   });
 
-  // Ordered lists — sequential counter
+  // Ordered lists — collect ALL numbered items first, then wrap in ONE <ol>
+  // This prevents multiple <ol> resets when questions are separated by blank lines
   html = html.replace(/^\d+\. (.+)$/gm, '<li-o>$1</li-o>');
-  html = html.replace(/(<li-o>[\s\S]*?<\/li-o>\n?)+/g, (m) => {
-    const items = m.replace(/<li-o>(.*?)<\/li-o>/g, '<li>$1</li>');
+
+  // Merge consecutive li-o items even if separated by whitespace/blank lines
+  // by first collapsing all li-o groups into one block, then wrapping
+  const liOPattern = /(<li-o>[\s\S]*?<\/li-o>)(\s*(<li-o>[\s\S]*?<\/li-o>))*/g;
+  html = html.replace(liOPattern, (m) => {
+    const items = m.replace(/<li-o>([\s\S]*?)<\/li-o>/g, '<li>$1</li>');
     return `<ol>${items}</ol>`;
   });
+
+  // Merge adjacent <ol> blocks that got separated — join them into one
+  html = html.replace(/<\/ol>\s*<ol>/g, '');
 
   // Convert remaining lines to paragraphs
   const blocks = html.split(/\n\n+/);
@@ -60,10 +68,9 @@ export function renderMarkdown(text: string): string {
     for (let i = 0; i < rawLines.length; i++) {
       const line = rawLines[i];
       const next = rawLines[i + 1];
-      // If this line is just a bold time like <strong>09:30</strong> and next starts with —
       if (line.match(/^<strong>\d{1,2}:\d{2}<\/strong>$/) && next && next.startsWith('—')) {
         lines.push(line + ' ' + next);
-        i++; // skip next
+        i++;
       } else {
         lines.push(line);
       }
@@ -103,12 +110,10 @@ export function extractDayAssignments(itineraryText: string): Record<string, str
     const nextDay = itineraryText.indexOf('## Day', dayStart + 1);
     const dayContent = itineraryText.slice(dayStart, nextDay > -1 ? nextDay : undefined);
 
-    // Extract place names from entries like "**09:00** — Place Name."
     const entryPattern = /\*\*\d+:\d+\*\*\s*—\s*([^.\n]+)/g;
     let entryMatch;
     while ((entryMatch = entryPattern.exec(dayContent)) !== null) {
       const placePart = entryMatch[1].trim();
-      // Extract place name — usually after "at" or the whole thing
       const atMatch = placePart.match(/(?:at|@)\s+(.+)/i);
       const placeName = atMatch ? atMatch[1].trim() : placePart;
       if (placeName.length > 2 && placeName.length < 60) {
