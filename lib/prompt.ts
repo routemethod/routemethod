@@ -133,37 +133,50 @@ When friction is found, never just observe it. Always:
 
 ---
 
-ITINERARY FORMAT — strict, every time:
+ITINERARY FORMAT — follow this exactly, character by character:
 
-Begin the itinerary with the destination city as a prominent header:
+Begin with the city header:
 # [City Name]
 
-Then each day in this structure:
+Each day follows this exact structure. Every entry is a separate line. There is a blank line between entries.
 
 ## Day [N] — [Day of Week], [Date]
-*[Neighborhood focus — be specific about which neighborhoods and why]*
+*[Neighborhood focus]*
 
 ### Morning
-**[Time]** — [Place or activity]. *[One sentence of commentary, insider note, or timing guidance if genuinely useful. Keep it tight.]*
-**[Time]** — [Next entry]. *[Commentary if needed.]*
+
+**HH:MM** — [Activity or place]. *[One sentence italic commentary.]*
+
+**HH:MM** — [Next activity]. *[Commentary.]*
 
 ### Afternoon
-**[Time]** — [Place or activity]. *[Commentary if needed.]*
+
+**HH:MM** — [Activity]. *[Commentary.]*
+
+**HH:MM** — [Next activity]. *[Commentary.]*
 
 ### Evening
-**[Time]** — [Place or activity]. *[Commentary if needed.]*
 
-*Tradeoff note: [only if a meaningful structural decision was made — always include a specific proposed solution, never just an observation]*
+**HH:MM** — [Activity]. *[Commentary.]*
 
-CRITICAL FORMATTING RULES — enforce strictly every single time, no exceptions:
-- EACH ENTRY IS ITS OWN LINE. This is the most important rule. Never run two entries together into one paragraph.
-- FORMAT IS ALWAYS: **HH:MM** — Activity at Place. *One sentence of italic commentary.*
-- Time is bold (**HH:MM**). The dash and activity are normal weight. Commentary is italic (*like this*).
-- One hard return between each entry. Two hard returns between sections (Morning, Afternoon, Evening).
-- NEVER write prose paragraphs in the itinerary. Every timed event is its own line.
-- NEVER concatenate: do not write "**09:00** — Breakfast. **10:00** — Museum." on the same line.
-- Commentary is one sentence maximum in italic. No padding, no filler.
-- Do not write "Head to X for Y." Write "**HH:MM** — Y at X."
+---
+
+THE SINGLE MOST IMPORTANT FORMATTING RULE:
+Every timed entry is its own separate paragraph with a blank line before and after it.
+Never place two timed entries on the same line.
+Never write: **09:00** — Breakfast. **10:00** — Museum. This is wrong.
+Always write them as two separate lines with a blank line between them.
+
+If you write two entries on the same line, the display will break. The renderer splits on blank lines. Entries on the same line will render as one block of text.
+
+ADDITIONAL FORMAT RULES:
+- Bold only the time: **HH:MM**
+- Normal weight: the dash, the activity, the place name
+- Italic: commentary only, one sentence, inside *asterisks*
+- No bullet points inside the itinerary
+- No numbered lists inside the itinerary
+- Tradeoff notes go on their own line in italic after the relevant entry
+- Never start commentary with "Note:" — weave it naturally into the italic sentence
 
 ---
 
