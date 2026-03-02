@@ -86,11 +86,14 @@ body {
   display: block;
 }
 
-/* Time stamps — bold, ink color, inline */
+/* Time stamps — bold, ink color, always inline, never change size */
 .itinerary-output strong {
   font-weight: 500;
   color: var(--color-ink);
-  display: inline;
+  display: inline !important;
+  font-size: inherit !important;
+  font-family: inherit !important;
+  line-height: inherit !important;
 }
 
 /* Commentary — italic, mist color, inline */
