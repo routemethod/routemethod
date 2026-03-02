@@ -32,13 +32,13 @@ export function renderMarkdown(text: string): string {
 
   // Unordered lists
   html = html.replace(/^- (.+)$/gm, '<li-u>$1</li-u>');
-  html = html.replace(/(<li-u>.*?<\/li-u>\n?)+/gs, (m) => {
+  html = html.replace(/(<li-u>[\s\S]*?<\/li-u>\n?)+/g, (m) => {
     const items = m.replace(/<li-u>(.*?)<\/li-u>/g, '<li>$1</li>');
     return `<ul>${items}</ul>`;
   });
 
   // Ordered lists — sequential counter
-  html = html.replace(/^\d+\. (.+)$/gm, '<li-o>$1</li-o>');
+  html = html.replace(/(<li-o>[\s\S]*?<\/li-o>\n?)+/g, (m) => {
   html = html.replace(/(<li-o>.*?<\/li-o>\n?)+/gs, (m) => {
     const items = m.replace(/<li-o>(.*?)<\/li-o>/g, '<li>$1</li>');
     return `<ol>${items}</ol>`;
