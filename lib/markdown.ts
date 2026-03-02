@@ -45,25 +45,36 @@ export function renderMarkdown(text: string): string {
   });
 
   // Convert remaining lines to paragraphs
-  // Split by double newline for paragraph breaks, single newline for line breaks
   const blocks = html.split(/\n\n+/);
   const processedBlocks = blocks.map(block => {
     block = block.trim();
     if (!block) return '';
-    // Already a block element
     if (block.startsWith('<h') || block.startsWith('<ul') ||
         block.startsWith('<ol') || block.startsWith('<hr') ||
         block.startsWith('<li')) return block;
 
-    // Split single newlines into separate paragraphs (each entry its own line)
-    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    const rawLines = block.split('\n').map(l => l.trim()).filter(Boolean);
+
+    // Join lines where a bold time stamp got split from its " — activity" continuation
+    const lines: string[] = [];
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const next = rawLines[i + 1];
+      // If this line is just a bold time like <strong>09:30</strong> and next starts with —
+      if (line.match(/^<strong>\d{1,2}:\d{2}<\/strong>$/) && next && next.startsWith('—')) {
+        lines.push(line + ' ' + next);
+        i++; // skip next
+      } else {
+        lines.push(line);
+      }
+    }
+
     if (lines.length === 0) return '';
     if (lines.length === 1) {
       if (lines[0].startsWith('<h') || lines[0].startsWith('<ul') ||
           lines[0].startsWith('<ol') || lines[0].startsWith('<hr')) return lines[0];
       return `<p>${lines[0]}</p>`;
     }
-    // Multiple lines — each becomes its own paragraph
     return lines.map(line => {
       if (line.startsWith('<h') || line.startsWith('<ul') ||
           line.startsWith('<ol') || line.startsWith('<hr') ||
