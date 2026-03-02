@@ -12,29 +12,43 @@ const BUDGET_OPTIONS = ['Budget', 'Mid-range', 'Luxury'];
 
 interface PlaceItem { name: string; notes?: string; day?: string; isLink?: boolean; }
 interface TripData {
-  destination: string;
-  arrival: string;
-  departure: string;
-  hotel: string;
-  pace: string;
-  budget: string;
-  mustDos: PlaceItem[];
-  restaurants: PlaceItem[];
-  cafes: PlaceItem[];
-  bars: PlaceItem[];
-  activities: PlaceItem[];
-  niceToHaves: PlaceItem[];
-  reservations: string[];
-  notes: string;
+  destination: string; arrival: string; departure: string; hotel: string;
+  pace: string; budget: string;
+  mustDos: PlaceItem[]; restaurants: PlaceItem[]; cafes: PlaceItem[];
+  bars: PlaceItem[]; activities: PlaceItem[]; niceToHaves: PlaceItem[];
+  reservations: string[]; notes: string;
 }
 
+// Parse places — treat URLs as atomic, never split on commas inside URLs
 function parsePlaces(raw: string): PlaceItem[] {
   if (!raw || raw === 'None') return [];
-  return raw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean).map(s => {
+  const lines: string[] = [];
+  let current = '';
+  let inUrl = false;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (raw.slice(i, i + 8).match(/^https?:\/\//)) inUrl = true;
+    if (inUrl && (ch === '\n' || (ch === ',' && raw[i+1] === ' ' && !raw.slice(i).match(/^,\s*\d/)))) {
+      inUrl = false;
+      lines.push(current.trim());
+      current = '';
+      continue;
+    }
+    if (!inUrl && (ch === '\n' || (ch === ',' && i < raw.length - 1))) {
+      if (current.trim()) lines.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) lines.push(current.trim());
+
+  return lines.filter(Boolean).map(s => {
     const isLink = /^https?:\/\//.test(s);
     const bracketMatch = s.match(/^([^\[]+)\[([^\]]+)\]/);
     if (bracketMatch) return { name: bracketMatch[1].trim(), notes: bracketMatch[2].trim(), isLink };
-    return { name: s, isLink };
+    return { name: isLink ? s : s, isLink };
   });
 }
 
@@ -52,10 +66,10 @@ export default function Home() {
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [dayAssignments, setDayAssignments] = useState<Record<string, string>>({});
+  const [fullItineraryContent, setFullItineraryContent] = useState<string>('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Form state
   const [destination, setDestination] = useState('');
   const [arrivalDate, setArrivalDate] = useState('');
   const [arrivalTime, setArrivalTime] = useState('');
@@ -78,21 +92,20 @@ export default function Home() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
 
-  // Update day assignments whenever itinerary messages appear
   useEffect(() => {
     const itineraryMessages = messages.filter(m => m.role === 'assistant' && m.content.includes('## Day'));
     if (itineraryMessages.length > 0) {
       const latest = itineraryMessages[itineraryMessages.length - 1];
-      const assignments = extractDayAssignments(latest.content);
-      setDayAssignments(assignments);
+      setFullItineraryContent(latest.content);
+      setDayAssignments(extractDayAssignments(latest.content));
     }
   }, [messages]);
 
-  // Check if a place name appears in day assignments
   const getDayForPlace = (placeName: string): string | undefined => {
+    if (!placeName || placeName.startsWith('http')) return undefined;
     const lower = placeName.toLowerCase();
     for (const [key, day] of Object.entries(dayAssignments)) {
-      if (lower.includes(key) || key.includes(lower)) return day;
+      if (lower.includes(key) || key.includes(lower.split(' ')[0])) return day;
     }
     return undefined;
   };
@@ -150,19 +163,14 @@ Additional Notes: ${notes || 'None'}`;
     setPanelOpen(true);
 
     const td: TripData = {
-      destination,
-      arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
+      destination, arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
       departure: `${departureDate}${departureTime ? ' at ' + departureTime : ''}`,
       hotel: `${hotelName}${hotelNeighborhood ? ', ' + hotelNeighborhood : ''}`,
       pace, budget,
-      mustDos: parsePlaces(mustDos),
-      restaurants: parsePlaces(restaurants),
-      cafes: parsePlaces(cafes),
-      bars: parsePlaces(bars),
-      activities: parsePlaces(activities),
-      niceToHaves: parsePlaces(niceToHaves),
-      reservations: parseReservations(reservations),
-      notes,
+      mustDos: parsePlaces(mustDos), restaurants: parsePlaces(restaurants),
+      cafes: parsePlaces(cafes), bars: parsePlaces(bars),
+      activities: parsePlaces(activities), niceToHaves: parsePlaces(niceToHaves),
+      reservations: parseReservations(reservations), notes,
     };
     setTripData(td);
 
@@ -172,27 +180,38 @@ Additional Notes: ${notes || 'None'}`;
     setIsLoading(false);
   };
 
-  // Update trip data when user clarifies something in chat
-  const updateTripDataFromChat = (userMessage: string) => {
+  const updateTripDataFromChat = (userMessage: string, assistantResponse?: string) => {
     if (!tripData) return;
     const updated = { ...tripData };
 
-    // Date updates
-    const arrivalMatch = userMessage.match(/arrival.*?(\w+ \d+|\d+\/\d+)/i);
-    const departureMatch = userMessage.match(/departure.*?(\w+ \d+|\d+\/\d+)/i);
-    if (arrivalMatch) updated.arrival = arrivalMatch[1];
-    if (departureMatch) updated.departure = departureMatch[1];
+    // Date corrections
+    const arrMatch = userMessage.match(/arrival.*?(\w+\s+\d+|\d+[\/\-]\d+)/i);
+    const depMatch = userMessage.match(/departure.*?(\w+\s+\d+|\d+[\/\-]\d+)/i);
+    if (arrMatch) updated.arrival = arrMatch[1];
+    if (depMatch) updated.departure = depMatch[1];
 
-    // Link clarifications — if user explains what a link was
-    const linkClarification = userMessage.match(/(?:that link|the link|it) (?:is|was) ([^,\.\n]+)/i);
-    if (linkClarification) {
-      const clarifiedName = linkClarification[1].trim();
-      // Replace any isLink item that hasn't been named yet
-      ['mustDos', 'restaurants', 'cafes', 'bars', 'activities', 'niceToHaves'].forEach(key => {
-        const arr = updated[key as keyof TripData] as PlaceItem[];
-        const idx = arr.findIndex((p: PlaceItem) => p.isLink && p.name.startsWith('http'));
-        if (idx > -1) arr[idx] = { ...arr[idx], name: clarifiedName, isLink: false };
-      });
+    // Link clarification — user explains what a URL was
+    const patterns = [
+      /(?:that(?:'s| is| was)|the link(?:'s| is| was)|it(?:'s| is| was))\s+([A-Z][^,\.\n]{2,40})/i,
+      /^([A-Z][^,\.\n]{2,40})\s+(?:is|was)\s+(?:a|an|the)/i,
+      /(?:link|url|that)\s+(?:is|was)?\s*(?:for|about)?\s+([A-Z][^,\.\n]{2,40})/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = userMessage.match(pattern);
+      if (match) {
+        const clarifiedName = match[1].trim();
+        const categories = ['mustDos', 'restaurants', 'cafes', 'bars', 'activities', 'niceToHaves'] as const;
+        for (const key of categories) {
+          const arr = updated[key] as PlaceItem[];
+          const idx = arr.findIndex(p => p.isLink);
+          if (idx > -1) {
+            arr[idx] = { name: clarifiedName, isLink: false };
+            break;
+          }
+        }
+        break;
+      }
     }
 
     setTripData(updated);
@@ -207,10 +226,12 @@ Additional Notes: ${notes || 'None'}`;
     updateTripDataFromChat(userMessage);
 
     const isRefinement = appStage === 'itinerary';
+    let currentCount = refinementCount;
+
     if (isRefinement) {
-      const newCount = refinementCount + 1;
-      setRefinementCount(newCount);
-      if (newCount > MAX_REFINEMENTS) {
+      currentCount = refinementCount + 1;
+      setRefinementCount(currentCount);
+      if (currentCount > MAX_REFINEMENTS) {
         setMessages(prev => [...prev,
           { role: 'user', content: userMessage },
           { role: 'assistant', content: "You have reached the refinement limit for this itinerary. Your final plan is ready to export." }
@@ -233,6 +254,13 @@ Additional Notes: ${notes || 'None'}`;
     }
   };
 
+  const handleViewFullItinerary = () => {
+    if (!fullItineraryContent) return;
+    // Add a synthetic assistant message showing the full itinerary
+    setMessages(prev => [...prev, { role: 'assistant', content: fullItineraryContent }]);
+    setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
   };
@@ -245,7 +273,7 @@ Additional Notes: ${notes || 'None'}`;
   };
 
   const stageNum = appStage === 'clarify' ? '2' : appStage === 'itinerary' ? '3' : '1';
-  const stageText = appStage === 'clarify' ? 'Clarify' : appStage === 'itinerary' ? 'Itinerary' : 'Input';
+  const stageLabels = ['Input', 'Clarify', 'Itinerary'];
 
   const S = {
     input: { width: '100%', backgroundColor: 'var(--color-cream)', border: '1px solid var(--color-border)', padding: '10px 14px', fontFamily: 'var(--font-body)', fontSize: '0.875rem', color: 'var(--color-ink)', fontWeight: 300, outline: 'none', lineHeight: 1.5 } as React.CSSProperties,
@@ -254,7 +282,6 @@ Additional Notes: ${notes || 'None'}`;
     sectionTitle: { fontFamily: 'var(--font-body)', fontSize: '0.6rem', letterSpacing: '0.18em', textTransform: 'uppercase' as const, color: 'var(--color-accent)', marginBottom: '14px', fontWeight: 500 },
   };
 
-  // Panel place list renderer
   const renderPlaceList = (items: PlaceItem[], label: string) => {
     if (!items || items.length === 0) return null;
     return (
@@ -264,11 +291,11 @@ Additional Notes: ${notes || 'None'}`;
           {items.map((item, i) => {
             const dayTag = getDayForPlace(item.name);
             return (
-              <li key={i} style={{ fontSize: '0.78rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
+              <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
                 <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>
                 <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name}</span>
-                {item.notes && <span style={{ color: 'var(--color-mist)', fontSize: '0.72rem' }}> [{item.notes}]</span>}
-                {dayTag && <span style={{ marginLeft: '6px', fontSize: '0.62rem', color: 'var(--color-accent)', fontWeight: 500, letterSpacing: '0.04em' }}>{dayTag}</span>}
+                {item.notes && <span style={{ color: 'var(--color-mist)', fontSize: '0.7rem' }}> [{item.notes}]</span>}
+                {dayTag && <span style={{ marginLeft: '6px', fontSize: '0.6rem', color: 'var(--color-accent)', fontWeight: 500 }}>{dayTag}</span>}
               </li>
             );
           })}
@@ -287,35 +314,53 @@ Additional Notes: ${notes || 'None'}`;
 
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', backgroundColor: 'var(--color-paper)' }}>
 
-        {/* Header */}
+        {/* HEADER */}
         <header style={{ borderBottom: '1px solid var(--color-border)', backgroundColor: 'var(--color-cream)', position: 'sticky', top: 0, zIndex: 20 }}>
-          <div style={{ maxWidth: panelOpen ? '100%' : '760px', margin: '0 auto', padding: '0 24px', height: '54px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <button onClick={() => setAppStage('landing')} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', background: 'none', border: 'none', cursor: 'pointer' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', padding: '0 24px', height: '54px', maxWidth: '100%' }}>
+
+            {/* Left — logo */}
+            <button onClick={() => setAppStage('landing')} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', background: 'none', border: 'none', cursor: 'pointer', justifySelf: 'start' }}>
               <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.05rem', fontWeight: 500, color: 'var(--color-ink)' }}>RouteMethod</span>
               <span style={{ fontSize: '0.56rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--color-accent)', fontWeight: 400 }}>Travel, Engineered.</span>
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-              <Link href="/method" style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', textDecoration: 'none' }}>The Method</Link>
-              {appStage !== 'landing' && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  {['1','2','3'].map((s) => (
-                    <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <div style={{ width: '20px', height: '20px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: s === stageNum ? 'var(--color-accent)' : 'transparent', border: `1px solid ${s === stageNum ? 'var(--color-accent)' : s < stageNum ? 'var(--color-accent)' : 'var(--color-border)'}`, fontSize: '0.58rem', fontWeight: 500, color: s === stageNum ? 'white' : s < stageNum ? 'var(--color-accent)' : 'var(--color-mist)', transition: 'all 0.3s' }}>
+
+            {/* Center — stage progress (always visible when not on landing) */}
+            {appStage !== 'landing' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifySelf: 'center' }}>
+                {['1', '2', '3'].map((s, idx) => (
+                  <div key={s} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                      <div style={{
+                        width: '22px', height: '22px', borderRadius: '50%',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        backgroundColor: s === stageNum ? 'var(--color-accent)' : 'transparent',
+                        border: `1px solid ${s <= stageNum ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                        fontSize: '0.58rem', fontWeight: 500,
+                        color: s === stageNum ? 'white' : s < stageNum ? 'var(--color-accent)' : 'var(--color-mist)',
+                        transition: 'all 0.3s'
+                      }}>
                         {s < stageNum ? '✓' : s}
                       </div>
-                      {s !== '3' && <div style={{ width: '12px', height: '1px', backgroundColor: s < stageNum ? 'var(--color-accent)' : 'var(--color-border)' }} />}
+                      <span style={{ fontSize: '0.52rem', letterSpacing: '0.06em', color: s === stageNum ? 'var(--color-accent)' : 'var(--color-mist)', fontWeight: s === stageNum ? 500 : 300 }}>
+                        {stageLabels[idx]}
+                      </span>
                     </div>
-                  ))}
-                  <span style={{ fontSize: '0.6rem', color: 'var(--color-mist)', marginLeft: '4px' }}>{stageText}</span>
-                </div>
-              )}
+                    {s !== '3' && <div style={{ width: '20px', height: '1px', backgroundColor: s < stageNum ? 'var(--color-accent)' : 'var(--color-border)', marginBottom: '14px' }} />}
+                  </div>
+                ))}
+              </div>
+            ) : <div />}
+
+            {/* Right — nav and controls */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', justifySelf: 'end' }}>
+              <Link href="/method" style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', textDecoration: 'none' }}>The Method</Link>
               {appStage === 'itinerary' && (
                 <span style={{ fontSize: '0.62rem', color: 'var(--color-mist)' }}>
                   <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>{refinementCount}</span>/{MAX_REFINEMENTS}
                 </span>
               )}
               {(appStage === 'clarify' || appStage === 'itinerary') && tripData && (
-                <button onClick={() => setPanelOpen(!panelOpen)} style={{ background: 'none', border: '1px solid var(--color-border)', padding: '4px 10px', fontSize: '0.6rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: panelOpen ? 'var(--color-accent)' : 'var(--color-mist)', cursor: 'pointer', borderColor: panelOpen ? 'var(--color-accent)' : 'var(--color-border)', transition: 'all 0.2s', fontFamily: 'var(--font-body)' }}>
+                <button onClick={() => setPanelOpen(!panelOpen)} style={{ background: 'none', border: '1px solid', padding: '4px 10px', fontSize: '0.6rem', letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'pointer', fontFamily: 'var(--font-body)', transition: 'all 0.2s', borderColor: panelOpen ? 'var(--color-accent)' : 'var(--color-border)', color: panelOpen ? 'var(--color-accent)' : 'var(--color-mist)' }}>
                   My List
                 </button>
               )}
@@ -324,7 +369,6 @@ Additional Notes: ${notes || 'None'}`;
         </header>
 
         <div style={{ flex: 1, display: 'flex' }}>
-          {/* Main content */}
           <main style={{ flex: 1, minWidth: 0 }}>
 
             {/* LANDING */}
@@ -336,7 +380,7 @@ Additional Notes: ${notes || 'None'}`;
                     <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2.2rem, 5vw, 3.4rem)', fontWeight: 400, color: 'var(--color-ink)', lineHeight: 1.15, marginBottom: '12px' }}>
                       Your saved places,<br /><em>finally structured.</em>
                     </h1>
-                    <p style={{ fontSize: '0.72rem', letterSpacing: '0.08em', color: 'var(--color-accent)', marginBottom: '20px', fontWeight: 400 }}>Guided by AI. Structured by method.</p>
+                    <p style={{ fontSize: '0.78rem', letterSpacing: '0.08em', color: 'var(--color-accent)', marginBottom: '20px', fontWeight: 400 }}>Guided by AI. Structured by method.</p>
                     <p style={{ fontSize: '0.95rem', color: 'var(--color-mist)', lineHeight: 1.75, maxWidth: '460px', marginBottom: '36px', fontWeight: 300 }}>
                       Paste your restaurants, cafes, and experiences. RouteMethod builds a day-by-day itinerary engineered around neighborhoods, energy, and what matters most to you.
                     </p>
@@ -377,9 +421,8 @@ Additional Notes: ${notes || 'None'}`;
             {appStage === 'input' && (
               <div style={{ maxWidth: '640px', margin: '0 auto', padding: '44px 24px 120px' }} className="animate-fade-up">
                 <div style={{ marginBottom: '36px' }}>
-                  <p style={{ ...S.sectionTitle, marginBottom: '10px' }}>Stage 1 of 3</p>
                   <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '1.7rem', fontWeight: 400, color: 'var(--color-ink)', marginBottom: '8px' }}>Your Trip</h2>
-                  <p style={{ fontSize: '0.82rem', color: 'var(--color-mist)', fontWeight: 300 }}>Fill in your details and saved places. Add notes in brackets where you have them — e.g. Contramar [reservation Tue 7pm] or Chapultepec [go early, gets crowded].</p>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--color-mist)', fontWeight: 300 }}>Fill in your details and saved places. Add notes in brackets — e.g. Contramar [reservation Tue 7pm] or Chapultepec [go early, gets crowded].</p>
                 </div>
 
                 <fieldset style={{ border: 'none', marginBottom: '32px' }}>
@@ -425,7 +468,7 @@ Additional Notes: ${notes || 'None'}`;
 
                 <fieldset style={{ border: 'none', marginBottom: '32px' }}>
                   <legend style={S.sectionTitle}>Saved Places</legend>
-                  <p style={{ fontSize: '0.7rem', color: 'var(--color-mist)', marginBottom: '14px', fontWeight: 300 }}>Add notes in brackets: e.g. Contramar [confirmed Tue 7pm] or Chapultepec [go early]</p>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--color-mist)', marginBottom: '14px', fontWeight: 300 }}>Add notes in brackets: Contramar [confirmed Tue 7pm] or Chapultepec [go early]</p>
                   <div style={{ display: 'grid', gap: '10px' }}>
                     {[
                       { label: 'Must Dos', value: mustDos, setter: setMustDos, placeholder: 'Non-negotiable experiences' },
@@ -462,13 +505,17 @@ Additional Notes: ${notes || 'None'}`;
             {/* STAGES 2 & 3 */}
             {(appStage === 'clarify' || appStage === 'itinerary') && (
               <div style={{ maxWidth: '680px', margin: '0 auto', padding: '36px 24px 160px' }}>
-                <div style={{ marginBottom: '28px' }}>
-                  <p style={{ ...S.sectionTitle, marginBottom: '6px' }}>Stage {appStage === 'clarify' ? '2 of 3 — Clarify' : '3 of 3 — Your Itinerary'}</p>
-                  {appStage === 'clarify' && <p style={{ fontSize: '0.8rem', color: 'var(--color-mist)', fontWeight: 300 }}>RouteMethod has a few questions before building your itinerary.</p>}
-                </div>
+                {appStage === 'clarify' && (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--color-mist)', fontWeight: 300, marginBottom: '28px' }}>RouteMethod has a few questions before building your itinerary.</p>
+                )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                   {messages.map((message, index) => (
-                    <ChatMessage key={index} message={message} />
+                    <ChatMessage
+                      key={index}
+                      message={message}
+                      onViewFullItinerary={handleViewFullItinerary}
+                      hasFullItinerary={!!fullItineraryContent}
+                    />
                   ))}
                   {isLoading && (
                     <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px 0' }}>
@@ -493,8 +540,6 @@ Additional Notes: ${notes || 'None'}`;
                 <p style={{ ...S.sectionTitle, marginBottom: 0 }}>My List</p>
                 <button onClick={() => setPanelOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-mist)', lineHeight: 1 }}>✕</button>
               </div>
-
-              {/* Trip basics */}
               <div style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid var(--color-border-light)' }}>
                 <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>Trip</p>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
@@ -506,34 +551,31 @@ Additional Notes: ${notes || 'None'}`;
                     { label: 'Pace', value: tripData.pace },
                     { label: 'Budget', value: tripData.budget },
                   ].filter(i => i.value).map(({ label, value }) => (
-                    <li key={label} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.5, fontWeight: 300, marginBottom: '3px' }}>
+                    <li key={label} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.5, fontWeight: 300, marginBottom: '3px', paddingLeft: '0.9rem', position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>
                       <span style={{ color: 'var(--color-mist)', fontSize: '0.68rem' }}>{label}: </span>{value}
                     </li>
                   ))}
                 </ul>
               </div>
-
               {renderPlaceList(tripData.mustDos, 'Must Dos')}
               {renderPlaceList(tripData.restaurants, 'Restaurants')}
               {renderPlaceList(tripData.cafes, 'Cafes')}
               {renderPlaceList(tripData.bars, 'Bars')}
               {renderPlaceList(tripData.activities, 'Activities')}
               {renderPlaceList(tripData.niceToHaves, 'Nice to Haves')}
-
               {tripData.reservations.length > 0 && (
                 <div style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid var(--color-border-light)' }}>
                   <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>Reservations</p>
                   <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                     {tripData.reservations.map((r, i) => (
                       <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '3px' }}>
-                        <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>
-                        {r}
+                        <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>{r}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-
               {tripData.notes && (
                 <div>
                   <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>Notes</p>
@@ -570,12 +612,6 @@ Additional Notes: ${notes || 'None'}`;
             <p style={{ fontSize: '0.62rem', color: 'var(--color-mist)', letterSpacing: '0.1em' }}>© {new Date().getFullYear()} RouteMethod — Travel, Engineered.</p>
           </footer>
         )}
-
-        <style>{`
-          @media (max-width: 899px) {
-            aside { display: none !important; }
-          }
-        `}</style>
       </div>
     </>
   );
