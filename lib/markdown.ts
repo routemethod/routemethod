@@ -108,3 +108,6 @@ export function extractDayAssignments(itineraryText: string): Record<string, str
 
   return assignments;
 }
+export function isItinerary(text: string): boolean {
+  return text.includes('## Day') || (text.includes('### Morning') && text.includes('### Evening'));
+}
