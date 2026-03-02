@@ -1,68 +1,78 @@
-// Markdown to HTML converter for RouteMethod
+// RouteMethod markdown renderer
 export function renderMarkdown(text: string): string {
   let html = text;
 
-  // Fix encoding issues — normalize em dashes and other special chars
+  // Fix encoding issues
   html = html.replace(/â€"/g, '—');
   html = html.replace(/â€˜/g, '\u2018');
   html = html.replace(/â€™/g, '\u2019');
   html = html.replace(/â€œ/g, '\u201C');
   html = html.replace(/â€/g, '\u201D');
+  html = html.replace(/---/g, '<hr>');
 
-  // Escape HTML entities
+  // Escape HTML (preserve our special tokens)
   html = html
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // Restore em dash after escaping
-  html = html.replace(/—/g, '—');
+  // Restore special tokens after escaping
+  html = html.replace(/&lt;hr&gt;/g, '<hr>');
 
   // Headers
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
   html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
   html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 
-  // Bold — inline only, never block
+  // Bold — always inline
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 
-  // Italic
+  // Italic — always inline
   html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
 
   // Unordered lists
-  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
+  html = html.replace(/^- (.+)$/gm, '<li-u>$1</li-u>');
+  html = html.replace(/(<li-u>.*?<\/li-u>\n?)+/gs, (m) => {
+    const items = m.replace(/<li-u>(.*?)<\/li-u>/g, '<li>$1</li>');
+    return `<ul>${items}</ul>`;
+  });
 
-  // Numbered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<oli>$1</oli>');
-  html = html.replace(/(<oli>.*<\/oli>\n?)+/g, (match) => {
-    const items = match.replace(/<oli>(.*?)<\/oli>/g, '<li>$1</li>');
+  // Ordered lists — sequential counter
+  html = html.replace(/^\d+\. (.+)$/gm, '<li-o>$1</li-o>');
+  html = html.replace(/(<li-o>.*?<\/li-o>\n?)+/gs, (m) => {
+    const items = m.replace(/<li-o>(.*?)<\/li-o>/g, '<li>$1</li>');
     return `<ol>${items}</ol>`;
   });
 
-  // Paragraphs — wrap loose lines
-  const lines = html.split('\n');
-  const processed: string[] = [];
-  let inPara = false;
+  // Convert remaining lines to paragraphs
+  // Split by double newline for paragraph breaks, single newline for line breaks
+  const blocks = html.split(/\n\n+/);
+  const processedBlocks = blocks.map(block => {
+    block = block.trim();
+    if (!block) return '';
+    // Already a block element
+    if (block.startsWith('<h') || block.startsWith('<ul') ||
+        block.startsWith('<ol') || block.startsWith('<hr') ||
+        block.startsWith('<li')) return block;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    const isBlock = trimmed.startsWith('<h') || trimmed.startsWith('<ul') ||
-      trimmed.startsWith('<ol') || trimmed.startsWith('<li') || trimmed === '';
-
-    if (isBlock) {
-      if (inPara) { processed.push('</p>'); inPara = false; }
-      if (trimmed === '') processed.push('<br class="spacer">');
-      else processed.push(line);
-    } else {
-      if (!inPara) { processed.push('<p>'); inPara = true; }
-      processed.push(trimmed + ' ');
+    // Split single newlines into separate paragraphs (each entry its own line)
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return '';
+    if (lines.length === 1) {
+      if (lines[0].startsWith('<h') || lines[0].startsWith('<ul') ||
+          lines[0].startsWith('<ol') || lines[0].startsWith('<hr')) return lines[0];
+      return `<p>${lines[0]}</p>`;
     }
-  }
-  if (inPara) processed.push('</p>');
+    // Multiple lines — each becomes its own paragraph
+    return lines.map(line => {
+      if (line.startsWith('<h') || line.startsWith('<ul') ||
+          line.startsWith('<ol') || line.startsWith('<hr') ||
+          line.startsWith('<li')) return line;
+      return `<p>${line}</p>`;
+    }).join('\n');
+  });
 
-  // Clean up spacers inside paragraphs
-  return processed.join('\n').replace(/<br class="spacer">\s*<\/p>/g, '</p>');
+  return processedBlocks.filter(Boolean).join('\n');
 }
 
 // Detect if message contains a full itinerary
@@ -70,45 +80,31 @@ export function isItinerary(text: string): boolean {
   return text.includes('## Day') || (text.includes('### Morning') && text.includes('### Evening'));
 }
 
-// Extract questions from end of a message
-export function extractQuestions(text: string): string[] {
-  const questions: string[] = [];
-  const lines = text.split('\n');
-  
-  for (const line of lines) {
-    const trimmed = line.trim();
-    // Match numbered questions like "1." or "1)"
-    if (/^\d+[\.\)]\s+.+\?/.test(trimmed)) {
-      questions.push(trimmed.replace(/^\d+[\.\)]\s+/, ''));
-    }
-  }
-  return questions;
-}
-
 // Extract day assignments from itinerary text
 export function extractDayAssignments(itineraryText: string): Record<string, string> {
   const assignments: Record<string, string> = {};
-  const dayMatches = itineraryText.match(/## Day (\d+)[^\n]*/g) || [];
-  
-  dayMatches.forEach((dayHeader) => {
-    const dayNum = dayHeader.match(/## Day (\d+)/)?.[1];
-    if (!dayNum) return;
-    
-    // Find content between this day header and the next
-    const dayStart = itineraryText.indexOf(dayHeader);
-    const nextDayMatch = itineraryText.indexOf('## Day', dayStart + 1);
-    const dayContent = itineraryText.slice(dayStart, nextDayMatch > -1 ? nextDayMatch : undefined);
-    
-    // Extract place names mentioned in this day
-    const placePattern = /(?:at|visit|head to|grab|stop at|try)\s+([A-Z][^,\.\n]+?)(?:\s+for|\s+at|\s+—|,|\.|\n)/g;
-    let match;
-    while ((match = placePattern.exec(dayContent)) !== null) {
-      const place = match[1].trim();
-      if (place.length > 2 && place.length < 50) {
-        assignments[place.toLowerCase()] = `Day ${dayNum}`;
+  const dayRegex = /## Day (\d+)[^\n]*/g;
+  let dayMatch;
+
+  while ((dayMatch = dayRegex.exec(itineraryText)) !== null) {
+    const dayNum = dayMatch[1];
+    const dayStart = dayMatch.index;
+    const nextDay = itineraryText.indexOf('## Day', dayStart + 1);
+    const dayContent = itineraryText.slice(dayStart, nextDay > -1 ? nextDay : undefined);
+
+    // Extract place names from entries like "**09:00** — Place Name."
+    const entryPattern = /\*\*\d+:\d+\*\*\s*—\s*([^.\n]+)/g;
+    let entryMatch;
+    while ((entryMatch = entryPattern.exec(dayContent)) !== null) {
+      const placePart = entryMatch[1].trim();
+      // Extract place name — usually after "at" or the whole thing
+      const atMatch = placePart.match(/(?:at|@)\s+(.+)/i);
+      const placeName = atMatch ? atMatch[1].trim() : placePart;
+      if (placeName.length > 2 && placeName.length < 60) {
+        assignments[placeName.toLowerCase()] = `Day ${dayNum}`;
       }
     }
-  });
-  
+  }
+
   return assignments;
 }
