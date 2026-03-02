@@ -171,7 +171,7 @@ Additional Notes: ${notes || 'None'}`;
       destination, arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
       departure: `${departureDate}${departureTime ? ' at ' + departureTime : ''}`,
       hotel: `${hotelName}${hotelNeighborhood ? ', ' + hotelNeighborhood : ''}`,
-      pace, budget,
+      pace, budget: budget.join(', '),
       mustDos: parsePlaces(mustDos), restaurants: parsePlaces(restaurants),
       cafes: parsePlaces(cafes), bars: parsePlaces(bars),
       activities: parsePlaces(activities), niceToHaves: parsePlaces(niceToHaves),
