@@ -13,7 +13,7 @@ const BUDGET_OPTIONS = ['Budget', 'Mid-range', 'Luxury'];
 interface PlaceItem { name: string; notes?: string; day?: string; isLink?: boolean; }
 interface TripData {
   destination: string; arrival: string; departure: string; hotel: string;
-  pace: string; budget: string;
+  pace: string; budget: string[];
   mustDos: PlaceItem[]; restaurants: PlaceItem[]; cafes: PlaceItem[];
   bars: PlaceItem[]; activities: PlaceItem[]; niceToHaves: PlaceItem[];
   reservations: string[]; notes: string;
@@ -85,7 +85,7 @@ export default function Home() {
   const [niceToHaves, setNiceToHaves] = useState('');
   const [reservations, setReservations] = useState('');
   const [pace, setPace] = useState('Balanced');
-  const [budget, setBudget] = useState('Mid-range');
+  const [budget, setBudget] = useState<string[]>(['Mid-range']);
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -117,7 +117,7 @@ Arrival: ${arrivalDate} at ${arrivalTime}
 Departure: ${departureDate} at ${departureTime}
 Hotel: ${hotelName}, ${hotelNeighborhood}
 Preferred pace: ${pace}
-Budget level: ${budget}
+Budget level: ${budget.join(', ')}
 
 SAVED PLACES:
 Must Dos: ${mustDos || 'None'}
@@ -130,11 +130,11 @@ Nice to Haves: ${niceToHaves || 'None'}
 Confirmed Reservations: ${reservations || 'None'}
 Additional Notes: ${notes || 'None'}`;
 
-  const callAPI = async (msgs: Message[]): Promise<string> => {
+  const callAPI = async (msgs: Message[], refinementsUsed?: number): Promise<string> => {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: msgs }),
+      body: JSON.stringify({ messages: msgs, refinementsUsed, maxRefinements: MAX_REFINEMENTS }),
     });
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -166,7 +166,7 @@ Additional Notes: ${notes || 'None'}`;
       destination, arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
       departure: `${departureDate}${departureTime ? ' at ' + departureTime : ''}`,
       hotel: `${hotelName}${hotelNeighborhood ? ', ' + hotelNeighborhood : ''}`,
-      pace, budget,
+      pace, budget: budget.join(', '),
       mustDos: parsePlaces(mustDos), restaurants: parsePlaces(restaurants),
       cafes: parsePlaces(cafes), bars: parsePlaces(bars),
       activities: parsePlaces(activities), niceToHaves: parsePlaces(niceToHaves),
@@ -180,9 +180,17 @@ Additional Notes: ${notes || 'None'}`;
     setIsLoading(false);
   };
 
-  const updateTripDataFromChat = (userMessage: string, assistantResponse?: string) => {
+  const updateTripDataFromChat = (userMessage: string) => {
     if (!tripData) return;
-    const updated = { ...tripData };
+    const updated = {
+      ...tripData,
+      mustDos: [...tripData.mustDos],
+      restaurants: [...tripData.restaurants],
+      cafes: [...tripData.cafes],
+      bars: [...tripData.bars],
+      activities: [...tripData.activities],
+      niceToHaves: [...tripData.niceToHaves],
+    };
 
     // Date corrections
     const arrMatch = userMessage.match(/arrival.*?(\w+\s+\d+|\d+[\/\-]\d+)/i);
@@ -191,13 +199,12 @@ Additional Notes: ${notes || 'None'}`;
     if (depMatch) updated.departure = depMatch[1];
 
     // Link clarification — user explains what a URL was
-    const patterns = [
-      /(?:that(?:'s| is| was)|the link(?:'s| is| was)|it(?:'s| is| was))\s+([A-Z][^,\.\n]{2,40})/i,
-      /^([A-Z][^,\.\n]{2,40})\s+(?:is|was)\s+(?:a|an|the)/i,
-      /(?:link|url|that)\s+(?:is|was)?\s*(?:for|about)?\s+([A-Z][^,\.\n]{2,40})/i,
+    const linkPatterns = [
+      /(?:that(?:'s| is| was)|the link(?:'s| is| was)|it(?:'s| is| was))\s+([A-Z][^,.\n]{2,40})/i,
+      /^([A-Z][^,.\n]{2,40})\s+(?:is|was)\s+(?:a|an|the)/i,
+      /(?:link|url|that)\s+(?:is|was)?\s*(?:for|about)?\s+([A-Z][^,.\n]{2,40})/i,
     ];
-
-    for (const pattern of patterns) {
+    for (const pattern of linkPatterns) {
       const match = userMessage.match(pattern);
       if (match) {
         const clarifiedName = match[1].trim();
@@ -205,13 +212,17 @@ Additional Notes: ${notes || 'None'}`;
         for (const key of categories) {
           const arr = updated[key] as PlaceItem[];
           const idx = arr.findIndex(p => p.isLink);
-          if (idx > -1) {
-            arr[idx] = { name: clarifiedName, isLink: false };
-            break;
-          }
+          if (idx > -1) { arr[idx] = { name: clarifiedName, isLink: false }; break; }
         }
         break;
       }
+    }
+
+    // New place added mid-conversation
+    const addMatch = userMessage.match(/(?:add|also add|include|I want to add|I'd like to add)\s+([A-Z][^,.\n]{2,50})/i);
+    if (addMatch) {
+      const newPlace = addMatch[1].replace(/\s+to(?:\s+my\s+list)?\s*$/i, '').trim();
+      updated.mustDos = [...updated.mustDos, { name: newPlace }];
     }
 
     setTripData(updated);
@@ -244,7 +255,7 @@ Additional Notes: ${notes || 'None'}`;
     const newMessages: Message[] = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
 
-    const content = await callAPI(newMessages);
+    const content = await callAPI(newMessages, currentCount);
     const updated: Message[] = [...newMessages, { role: 'assistant', content }];
     setMessages(updated);
     setIsLoading(false);
@@ -293,7 +304,7 @@ Additional Notes: ${notes || 'None'}`;
             return (
               <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
                 <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>
-                <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name}</span>
+                <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name.replace(/\s*[\[\(][^\]\)]*[\]\)]\s*/g, '').trim()}</span>
                 {item.notes && <span style={{ color: 'var(--color-mist)', fontSize: '0.7rem' }}> [{item.notes}]</span>}
                 {dayTag && <span style={{ marginLeft: '6px', fontSize: '0.6rem', color: 'var(--color-accent)', fontWeight: 500 }}>{dayTag}</span>}
               </li>
@@ -458,9 +469,10 @@ Additional Notes: ${notes || 'None'}`;
                     <div>
                       <p style={{ fontSize: '0.68rem', color: 'var(--color-mist)', marginBottom: '8px' }}>Budget Level</p>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        {BUDGET_OPTIONS.map(o => (
-                          <button key={o} onClick={() => setBudget(o)} style={{ ...S.toggle, backgroundColor: budget === o ? 'var(--color-ink)' : 'transparent', color: budget === o ? 'var(--color-paper)' : 'var(--color-mist)', borderColor: budget === o ? 'var(--color-ink)' : 'var(--color-border)' }}>{o}</button>
-                        ))}
+                        {BUDGET_OPTIONS.map(o => {
+                          const selected = budget.includes(o);
+                          return <button key={o} onClick={() => setBudget(prev => prev.includes(o) ? prev.filter(b => b !== o) : [...prev, o])} style={{ ...S.toggle, backgroundColor: selected ? 'var(--color-ink)' : 'transparent', color: selected ? 'var(--color-paper)' : 'var(--color-mist)', borderColor: selected ? 'var(--color-ink)' : 'var(--color-border)' }}>{o}</button>;
+                        })}
                       </div>
                     </div>
                   </div>
