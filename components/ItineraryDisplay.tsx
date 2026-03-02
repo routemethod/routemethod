@@ -24,7 +24,7 @@ export default function ItineraryDisplay({ content }: ItineraryDisplayProps) {
         ul { list-style: none; padding: 0; margin-bottom: 0.5rem; }
         ul li { font-size: 0.82rem; line-height: 1.6; color: #2A3441; padding-left: 1rem; position: relative; margin-bottom: 0.15rem; }
         ul li::before { content: '—'; position: absolute; left: 0; color: #8B3A2A; }
-        strong { font-weight: 500; color: #0D0D0D; display: block; margin-top: 0.5rem; margin-bottom: 0.15rem; }
+        strong { font-weight: 500; color: #0D0D0D; display: inline !important; font-size: inherit !important; }
         em { font-style: italic; color: #8A919C; font-size: 0.78rem; display: block; margin-bottom: 0.35rem; padding-left: 0.75rem; border-left: 2px solid #E0DBD1; }
       </style></head><body>
       <div class="header"><div class="logo">RouteMethod</div><div class="tagline">Travel, Engineered.</div></div>
