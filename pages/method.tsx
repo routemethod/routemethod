@@ -27,9 +27,8 @@ export default function Method() {
         <main style={{ maxWidth: '640px', margin: '0 auto', padding: '64px 24px 96px' }}>
           <div className="animate-fade-up">
             <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.62rem', letterSpacing: '0.22em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '16px', fontWeight: 400 }}>The Method</p>
+            <p style={{ fontFamily: 'var(--font-body)', fontSize: '0.8rem', letterSpacing: '0.08em', color: 'var(--color-accent)', marginBottom: '20px', fontWeight: 400 }}>Guided by AI. Structured by method.</p>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2rem, 4vw, 2.8rem)', fontWeight: 400, color: 'var(--color-ink)', lineHeight: 1.2, marginBottom: '20px' }}>
-              Guided by AI. Structured by method.</p>
-            <p style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2rem, 4vw, 2.8rem)', fontWeight: 400, color: 'var(--color-ink)', lineHeight: 1.2, marginBottom: '20px' }}>
               Efficient travel is not accidental.<br />
               <em>It is engineered.</em>
             </h1>
