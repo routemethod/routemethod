@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { NextApiRequest, NextApiResponse } from 'next';
+import { NextApiRequest, NextApiResponse } from 'next';
 import { ROUTEMETHOD_SYSTEM_PROMPT } from '../../lib/prompt';
 
 const client = new Anthropic({
@@ -11,10 +11,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages } = req.body;
+  const { messages, refinementsUsed, maxRefinements } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'Messages array required' });
+  }
+
+  // Inject refinement count so AI always references the correct number
+  let systemPrompt = ROUTEMETHOD_SYSTEM_PROMPT;
+  if (refinementsUsed !== undefined && maxRefinements !== undefined) {
+    const remaining = maxRefinements - refinementsUsed;
+    systemPrompt += `\n\nCURRENT REFINEMENT STATUS: The user has used ${refinementsUsed} of ${maxRefinements} refinements. They have ${remaining} remaining. Always reference these exact numbers when mentioning refinements remaining.`;
   }
 
   try {
@@ -25,7 +32,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const stream = client.messages.stream({
       model: 'claude-opus-4-6',
       max_tokens: 4096,
-      system: ROUTEMETHOD_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: messages,
     });
 
