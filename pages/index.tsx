@@ -624,7 +624,7 @@ Additional Notes: ${notes || 'None'}`;
     if (hasFullItinerary && currentCount >= MAX_REFINEMENTS) {
       setMessages(prev => [...prev,
         { role: 'user', content: userMessage },
-        { role: 'assistant', content: "You have reached the refinement limit for this itinerary. Your final plan is ready to export." }
+        { role: 'assistant' as const, content: "You have reached the refinement limit for this itinerary. Your final plan is ready to export." }
       ]);
       setIsLoading(false);
       return;
@@ -653,7 +653,7 @@ Additional Notes: ${notes || 'None'}`;
     const effectiveStage = hasFullItinerary ? 'itinerary' : appStage;
     const content = await callAPI(newMessages, currentCount, effectiveStage, updatedTripData);
     stopLoadingPhases();
-    const withReply = [...newMessages, { role: 'assistant', content }];
+    const withReply: Message[] = [...newMessages, { role: 'assistant' as const, content }];
     messagesRef.current = withReply;
     setMessages(withReply);
     setIsLoading(false);
@@ -687,7 +687,7 @@ Additional Notes: ${notes || 'None'}`;
 
   const handleViewFullItinerary = () => {
     if (!fullItineraryContent) return;
-    setMessages(prev => [...prev, { role: 'assistant', content: fullItineraryContent }]);
+    setMessages(prev => [...prev, { role: 'assistant' as const, content: fullItineraryContent }]);
     setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
   };
 
