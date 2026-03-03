@@ -574,7 +574,7 @@ Additional Notes: ${notes || 'None'}`;
     const initialMessages: Message[] = [{ role: 'user', content: buildTripText() }];
     const content = await callAPI(initialMessages, 0, 'clarify', td);
     stopLoadingPhases();
-    const finalMessages = [...initialMessages, { role: 'assistant', content }];
+    const finalMessages: Message[] = [...initialMessages, { role: 'assistant' as const, content }];
     messagesRef.current = finalMessages;
     setMessages(finalMessages);
     const newChanges = parseAIChanges(content, td);
