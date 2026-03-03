@@ -366,12 +366,17 @@ export default function Home() {
   };
 
   const rowsToItems = (rows: PlaceRow[]): PlaceItem[] =>
-    rows.filter(r => r.name.trim()).map(r => ({
-      name: r.name.trim(),
-      reservation: r.reservation.trim() || undefined,
-      notes: r.notes.trim() || undefined,
-      nonNegotiable: r.nonNegotiable,
-    }));
+    rows.filter(r => r.name.trim()).map(r => {
+      const name = r.name.trim();
+      const isLink = name.startsWith('http://') || name.startsWith('https://');
+      return {
+        name,
+        isLink,
+        reservation: r.reservation.trim() || undefined,
+        notes: r.notes.trim() || undefined,
+        nonNegotiable: r.nonNegotiable,
+      };
+    });
 
   const formatPlacesForAI = (items: PlaceItem[]): string => {
     if (items.length === 0) return 'None';
@@ -386,11 +391,26 @@ export default function Home() {
 
   const buildTripText = () => {
     const hotelText = hotels.filter(h => h.name.trim()).map(h => `${h.name}${h.neighborhood ? ', ' + h.neighborhood : ''}`).join(' / ') || 'None';
+    // Format flight times as "MMM D at H:MMam/pm"
+    const formatFlightTime = (date: string, time: string): string => {
+      if (!date) return '';
+      const [year, month, day] = date.split('-').map(Number);
+      const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][month - 1] || '';
+      if (!time) return `${mon} ${day}`;
+      const [hRaw, min] = time.split(':').map(Number);
+      const ampm = hRaw >= 12 ? 'pm' : 'am';
+      let h = hRaw > 12 ? hRaw - 12 : hRaw === 0 ? 12 : hRaw;
+      const minStr = min === 0 ? '00' : min < 10 ? `0${min}` : `${min}`;
+      return `${mon} ${day} at ${h}:${minStr}${ampm}`;
+    };
+    const arrivalFormatted = formatFlightTime(arrivalDate, arrivalTime);
+    const departureFormatted = formatFlightTime(departureDate, departureTime);
+
     return `Here are my trip details:
 
 Destination: ${destination}
-Flight Arrival Time: ${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}
-Flight Departure Time: ${departureDate}${departureTime ? ' at ' + departureTime : ''}
+Flight Arrival Time: ${arrivalFormatted}
+Flight Departure Time: ${departureFormatted}
 Hotel(s): ${hotelText}
 Preferred pace: ${pace}
 Budget level: ${budget.join(' & ')}
@@ -446,61 +466,70 @@ Additional Notes: ${notes || 'None'}`;
     return fullContent;
   };
 
-  // Parse AI response for proposed additions/removals and URL resolutions
-  const parseAIChanges = (content: string, currentTripData: TripData | null): PendingChange[] => {
+  const PLACE_CATS: Array<keyof Pick<TripData, 'restaurants'|'cafes'|'bars'|'activities'|'niceToHaves'>> = ['restaurants','cafes','bars','activities','niceToHaves'];
+
+  // Parse AI response for list changes and URL resolutions
+  const parseAIChanges = (aiContent: string, currentTripData: TripData | null): PendingChange[] => {
     if (!currentTripData) return [];
     const changes: PendingChange[] = [];
-
-    // Detect URL resolutions via signal: "RESOLVED_URL: [url] → [Place Name]"
-    const urlResolvePattern = /RESOLVED_URL:[\s]*(https?:\/\/[^\s]+)[\s]*→[\s]*([^\n]+)/gi;
     let m: RegExpExecArray | null;
-    while ((m = urlResolvePattern.exec(content)) !== null) {
-      const originalUrl = m[1].trim();
-      const resolvedName = m[2].trim();
-      const cats: Array<keyof Pick<TripData, 'restaurants'|'cafes'|'bars'|'activities'|'niceToHaves'>> = ['restaurants','cafes','bars','activities','niceToHaves'];
-      for (const cat of cats) {
-        const found = currentTripData[cat].find(p => p.name === originalUrl || p.isLink);
+
+    // REMOVED: [place name]
+    const removedRe = /^REMOVED:\s*(.+)$/gim;
+    while ((m = removedRe.exec(aiContent)) !== null) {
+      const name = m[1].trim();
+      for (const cat of PLACE_CATS) {
+        const found = currentTripData[cat].find(p => p.name.toLowerCase() === name.toLowerCase());
         if (found) {
-          // URL resolutions apply automatically — no user confirmation needed
-          changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: resolvedName, isLink: false }, originalUrl });
+          changes.push({ id: `remove-${Date.now()}-${Math.random()}`, type: 'remove', category: cat, item: { name: found.name } });
+          break;
         }
       }
     }
 
-    // Detect proposed additions: "ADD_PROPOSAL: [category] | [name] | [reservation] | [notes]"
-    const addPattern = /ADD_PROPOSAL:\s*(\w+)\s*\|\s*([^|]+)\s*\|?\s*([^|]*)\s*\|?\s*([^\n]*)/gi;
-    while ((m = addPattern.exec(content)) !== null) {
-      const cat = m[1].toLowerCase() as PendingChange['category'];
-      if (['restaurants','cafes','bars','activities','niceToHaves'].includes(cat)) {
-        changes.push({ id: `add-${Date.now()}-${Math.random()}`, type: 'add', category: cat, item: { name: m[2].trim(), reservation: m[3]?.trim() || undefined, notes: m[4]?.trim() || undefined } });
+    // ADDED: [category] | [place name]
+    const addedRe = /^ADDED:\s*(\w+)\s*\|\s*(.+)$/gim;
+    while ((m = addedRe.exec(aiContent)) !== null) {
+      const cat = m[1].trim().toLowerCase() as PendingChange['category'];
+      if ((PLACE_CATS as string[]).includes(cat)) {
+        changes.push({ id: `add-${Date.now()}-${Math.random()}`, type: 'add', category: cat, item: { name: m[2].trim() } });
       }
     }
 
-    // Detect proposed removals: "REMOVE_PROPOSAL: [category] | [name]"
-    const removePattern = /REMOVE_PROPOSAL:\s*(\w+)\s*\|\s*([^\n]+)/gi;
-    while ((m = removePattern.exec(content)) !== null) {
-      const cat = m[1].toLowerCase() as PendingChange['category'];
-      if (['restaurants','cafes','bars','activities','niceToHaves'].includes(cat)) {
-        changes.push({ id: `remove-${Date.now()}-${Math.random()}`, type: 'remove', category: cat, item: { name: m[2].trim() } });
+    // RESOLVED_URL: [url] → [Place Name]
+    const resolvedRe = /^RESOLVED_URL:\s*(https?:\/\/\S+)\s*→\s*(.+)$/gim;
+    while ((m = resolvedRe.exec(aiContent)) !== null) {
+      const originalUrl = m[1].trim();
+      const resolvedName = m[2].trim();
+      for (const cat of PLACE_CATS) {
+        const found = currentTripData[cat].find(p => p.name === originalUrl || (p.isLink && p.name.startsWith('http')));
+        if (found) {
+          changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: resolvedName, isLink: false }, originalUrl: found.name });
+          break;
+        }
       }
     }
 
     return changes;
   };
 
-  const confirmChange = (change: PendingChange) => {
-    if (!tripData) return;
-    const updated = { ...tripData, [change.category]: [...tripData[change.category]] };
+  const applyChange = (change: PendingChange, td: TripData): TripData => {
+    const updated = { ...td, [change.category]: [...td[change.category]] };
     if (change.type === 'add') {
       updated[change.category] = [...updated[change.category], change.item];
     } else if (change.type === 'remove') {
-      updated[change.category] = updated[change.category].filter(p => p.name !== change.item.name);
+      updated[change.category] = updated[change.category].filter(p => p.name.toLowerCase() !== change.item.name.toLowerCase());
     } else if (change.type === 'resolve-url') {
       updated[change.category] = updated[change.category].map(p =>
-        (p.name === change.originalUrl || p.isLink) ? { ...p, name: change.item.name, isLink: false } : p
+        (p.name === change.originalUrl || (p.isLink && p.name.startsWith('http'))) ? { ...p, name: change.item.name, isLink: false } : p
       );
     }
-    setTripData(updated);
+    return updated;
+  };
+
+  const confirmChange = (change: PendingChange) => {
+    if (!tripData) return;
+    setTripData(applyChange(change, tripData));
     setPendingChanges(prev => prev.filter(c => c.id !== change.id));
   };
 
@@ -518,8 +547,8 @@ Additional Notes: ${notes || 'None'}`;
     const hotelList = hotels.filter(h => h.name.trim());
     const td: TripData = {
       destination,
-      arrival: `${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}`,
-      departure: `${departureDate}${departureTime ? ' at ' + departureTime : ''}`,
+      arrival: formatFlightTime(arrivalDate, arrivalTime),
+      departure: formatFlightTime(departureDate, departureTime),
       hotels: hotelList,
       pace, budget,
       restaurants: rowsToItems(restaurants),
@@ -536,7 +565,20 @@ Additional Notes: ${notes || 'None'}`;
     stopLoadingPhases();
     setMessages([...initialMessages, { role: 'assistant', content }]);
     const newChanges = parseAIChanges(content, td);
-    if (newChanges.length > 0) setPendingChanges(prev => [...prev, ...newChanges]);
+    if (newChanges.length > 0) {
+      // REMOVED and RESOLVED_URL apply immediately; ADDED goes to pending for user confirmation
+      let latestTripData = td;
+      const pendingAdds: PendingChange[] = [];
+      for (const change of newChanges) {
+        if (change.type === 'remove' || change.type === 'resolve-url') {
+          latestTripData = applyChange(change, latestTripData);
+        } else {
+          pendingAdds.push(change);
+        }
+      }
+      setTripData(latestTripData);
+      if (pendingAdds.length > 0) setPendingChanges(prev => [...prev, ...pendingAdds]);
+    }
     setIsLoading(false);
   };
 
@@ -611,7 +653,19 @@ Additional Notes: ${notes || 'None'}`;
     if (refinementConfirm) setRefinementCount(parseInt(refinementConfirm[1], 10));
 
     const newChanges = parseAIChanges(content, updatedTripData);
-    if (newChanges.length > 0) setPendingChanges(prev => [...prev, ...newChanges]);
+    if (newChanges.length > 0) {
+      let latestTripData = updatedTripData ?? tripData;
+      const pendingAdds: PendingChange[] = [];
+      for (const change of newChanges) {
+        if (change.type === 'remove' || change.type === 'resolve-url') {
+          if (latestTripData) latestTripData = applyChange(change, latestTripData);
+        } else {
+          pendingAdds.push(change);
+        }
+      }
+      if (latestTripData) setTripData(latestTripData);
+      if (pendingAdds.length > 0) setPendingChanges(prev => [...prev, ...pendingAdds]);
+    }
   };
 
   const handleViewFullItinerary = () => {
