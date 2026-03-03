@@ -77,11 +77,17 @@ export default function ChatMessage({ message, onViewFullItinerary, hasFullItine
 }
 
 function stripSignals(text: string): string {
-  return text
+  // Strip everything before [BEGIN_ITINERARY] if present
+  const beginMarker = '[BEGIN_ITINERARY]';
+  const markerIdx = text.indexOf(beginMarker);
+  const cleaned = markerIdx !== -1 ? text.slice(markerIdx + beginMarker.length) : text;
+
+  // Strip signal lines
+  return cleaned
     .split('\n')
     .filter(line => {
       const t = line.trim();
-      return !t.startsWith('RESOLVED_URL:') && !t.startsWith('REMOVED:') && !t.startsWith('ADDED:');
+      return !t.startsWith('RESOLVED_URL:') && !t.startsWith('REMOVED:') && !t.startsWith('ADDED:') && t !== '[BEGIN_ITINERARY]';
     })
     .join('\n')
     .trim();
