@@ -115,6 +115,18 @@ function normalizeReservation(input: string): string {
   return `${mon} ${day} at ${hour}:${minStr}${ampm}`;
 }
 
+function formatFlightTime(date: string, time: string): string {
+  if (!date) return '';
+  const [, month, day] = date.split('-').map(Number);
+  const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][month - 1] || '';
+  if (!time) return `${mon} ${day}`;
+  const [hRaw, min] = time.split(':').map(Number);
+  const ampm = hRaw >= 12 ? 'pm' : 'am';
+  const h = hRaw > 12 ? hRaw - 12 : hRaw === 0 ? 12 : hRaw;
+  const minStr = min === 0 ? '00' : min < 10 ? `0${min}` : `${min}`;
+  return `${mon} ${day} at ${h}:${minStr}${ampm}`;
+}
+
 function useAutoExpand(rows: PlaceRow[], setRows: (r: PlaceRow[]) => void) {
   useEffect(() => {
     const last = rows[rows.length - 1];
@@ -391,18 +403,6 @@ export default function Home() {
 
   const buildTripText = () => {
     const hotelText = hotels.filter(h => h.name.trim()).map(h => `${h.name}${h.neighborhood ? ', ' + h.neighborhood : ''}`).join(' / ') || 'None';
-    // Format flight times as "MMM D at H:MMam/pm"
-    const formatFlightTime = (date: string, time: string): string => {
-      if (!date) return '';
-      const [year, month, day] = date.split('-').map(Number);
-      const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][month - 1] || '';
-      if (!time) return `${mon} ${day}`;
-      const [hRaw, min] = time.split(':').map(Number);
-      const ampm = hRaw >= 12 ? 'pm' : 'am';
-      let h = hRaw > 12 ? hRaw - 12 : hRaw === 0 ? 12 : hRaw;
-      const minStr = min === 0 ? '00' : min < 10 ? `0${min}` : `${min}`;
-      return `${mon} ${day} at ${h}:${minStr}${ampm}`;
-    };
     const arrivalFormatted = formatFlightTime(arrivalDate, arrivalTime);
     const departureFormatted = formatFlightTime(departureDate, departureTime);
 
