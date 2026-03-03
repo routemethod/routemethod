@@ -318,6 +318,7 @@ export default function Home() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesRef = useRef<Message[]>([]);
 
   // Form state
   const [destination, setDestination] = useState('');
@@ -345,6 +346,14 @@ export default function Home() {
       const latest = itineraryMessages[itineraryMessages.length - 1];
       setFullItineraryContent(latest.content);
       setDayAssignments(extractDayAssignments(latest.content));
+      // Safety net: if a full itinerary exists in history but stage never advanced, fix it now
+      const dayCount = countItineraryDays(latest.content);
+      const hasCityHeader = latest.content.trimStart().startsWith('# ') || latest.content.includes('\n# ');
+      const requiredDays = calcRequiredDayCount(arrivalDate, departureDate);
+      if (!hasFullItinerary && hasCityHeader && dayCount >= requiredDays) {
+        setHasFullItinerary(true);
+        setAppStage('itinerary');
+      }
     }
   }, [messages]);
 
@@ -502,7 +511,9 @@ Additional Notes: ${notes || 'None'}`;
       const originalUrl = m[1].trim();
       const resolvedName = m[2].trim();
       for (const cat of PLACE_CATS) {
-        const found = currentTripData[cat].find(p => p.name === originalUrl || (p.isLink && p.name.startsWith('http')));
+        // Exact URL match first, then isLink fallback
+        const found = currentTripData[cat].find(p => p.name === originalUrl)
+          || currentTripData[cat].find(p => p.isLink && p.name.startsWith('http') && p.name === originalUrl);
         if (found) {
           changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: resolvedName, isLink: false }, originalUrl: found.name });
           break;
@@ -521,7 +532,7 @@ Additional Notes: ${notes || 'None'}`;
       updated[change.category] = updated[change.category].filter(p => p.name.toLowerCase() !== change.item.name.toLowerCase());
     } else if (change.type === 'resolve-url') {
       updated[change.category] = updated[change.category].map(p =>
-        (p.name === change.originalUrl || (p.isLink && p.name.startsWith('http'))) ? { ...p, name: change.item.name, isLink: false } : p
+        p.name === change.originalUrl ? { ...p, name: change.item.name, isLink: false } : p
       );
     }
     return updated;
@@ -563,7 +574,9 @@ Additional Notes: ${notes || 'None'}`;
     const initialMessages: Message[] = [{ role: 'user', content: buildTripText() }];
     const content = await callAPI(initialMessages, 0, 'clarify', td);
     stopLoadingPhases();
-    setMessages([...initialMessages, { role: 'assistant', content }]);
+    const finalMessages = [...initialMessages, { role: 'assistant', content }];
+    messagesRef.current = finalMessages;
+    setMessages(finalMessages);
     const newChanges = parseAIChanges(content, td);
     if (newChanges.length > 0) {
       // REMOVED and RESOLVED_URL apply immediately; ADDED goes to pending for user confirmation
@@ -633,12 +646,16 @@ Additional Notes: ${notes || 'None'}`;
       requiredDayCount = calcRequiredDayCount(arrivalDate, departureDate);
     }
 
-    const newMessages: Message[] = [...messages, { role: 'user', content: userMessage }];
+    const newMessages: Message[] = [...messagesRef.current, { role: 'user', content: userMessage }];
+    messagesRef.current = newMessages;
     setMessages(newMessages);
 
-    const content = await callAPI(newMessages, currentCount, appStage, updatedTripData);
+    const effectiveStage = hasFullItinerary ? 'itinerary' : appStage;
+    const content = await callAPI(newMessages, currentCount, effectiveStage, updatedTripData);
     stopLoadingPhases();
-    setMessages([...newMessages, { role: 'assistant', content }]);
+    const withReply = [...newMessages, { role: 'assistant', content }];
+    messagesRef.current = withReply;
+    setMessages(withReply);
     setIsLoading(false);
 
     const dayCount = countItineraryDays(content);
