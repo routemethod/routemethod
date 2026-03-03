@@ -49,6 +49,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
+
     const stream = client.messages.stream({
       model: 'claude-opus-4-6',
       max_tokens: 4096,
@@ -57,19 +58,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     });
 
     stream.on('text', (text) => {
-  res.write(`data: ${JSON.stringify({ text })}\n\n`);
-  (res as any).flush?.();
-});
-stream.on('finalMessage', () => {
-  res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-  (res as any).flush?.();
-  res.end();
-});
-stream.on('error', (error) => {
-  res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
-  (res as any).flush?.();
-  res.end();
-});
+      res.write(`data: ${JSON.stringify({ text })}\n\n`);
+      (res as any).flush?.();
+    });
+
+    stream.on('finalMessage', () => {
+      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+      (res as any).flush?.();
+      res.end();
+    });
+
+    stream.on('error', (error) => {
+      res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
+      (res as any).flush?.();
+      res.end();
+    });
 
   } catch (error) {
     console.error('API error:', error);
