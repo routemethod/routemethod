@@ -11,18 +11,38 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { messages, refinementsUsed, maxRefinements } = req.body;
+  const { messages, appStage, refinementsUsed, maxRefinements, tripData } = req.body;
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: 'Messages array required' });
   }
 
-  // Inject refinement count so AI always references the correct number
+  // Append structured SESSION STATE block to system prompt
   let systemPrompt = ROUTEMETHOD_SYSTEM_PROMPT;
-  if (refinementsUsed !== undefined && maxRefinements !== undefined) {
-    const remaining = maxRefinements - refinementsUsed;
-    systemPrompt += `\n\nCURRENT REFINEMENT STATUS: The user has used ${refinementsUsed} of ${maxRefinements} refinements. They have ${remaining} remaining. Always reference these exact numbers when mentioning refinements remaining.`;
+
+  const sessionLines: string[] = [];
+  sessionLines.push('============================================================');
+  sessionLines.push('SESSION STATE');
+  sessionLines.push('============================================================');
+  if (appStage !== undefined) sessionLines.push(`appStage: ${appStage}`);
+  if (typeof refinementsUsed === 'number') sessionLines.push(`refinementsUsed: ${refinementsUsed}`);
+  if (typeof maxRefinements === 'number') sessionLines.push(`maxRefinements: ${maxRefinements}`);
+  if (tripData) {
+    if (tripData.destination) sessionLines.push(`destination: ${tripData.destination}`);
+    if (tripData.arrival) sessionLines.push(`arrivalProvided: ${tripData.arrival}`);
+    if (tripData.departure) sessionLines.push(`departureProvided: ${tripData.departure}`);
+    // Collect starred non-negotiables across all categories
+    const allItems = [
+      ...(tripData.restaurants || []),
+      ...(tripData.cafes || []),
+      ...(tripData.bars || []),
+      ...(tripData.activities || []),
+      ...(tripData.niceToHaves || []),
+    ];
+    const starred = allItems.filter((p: { nonNegotiable?: boolean; name: string }) => p.nonNegotiable).map((p: { name: string }) => p.name);
+    if (starred.length > 0) sessionLines.push(`starredNonNegotiables: ${starred.join(', ')}`);
   }
+  systemPrompt += '\n\n' + sessionLines.join('\n');
 
   try {
     res.setHeader('Content-Type', 'text/event-stream');
