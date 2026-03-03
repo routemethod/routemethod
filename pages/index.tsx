@@ -10,19 +10,25 @@ const MAX_REFINEMENTS = 8;
 const PACE_OPTIONS = ['Relaxed', 'Balanced', 'Packed'];
 const BUDGET_OPTIONS = ['Budget', 'Mid-range', 'Luxury'];
 
-// A single row in a place category
-interface PlaceRow { name: string; notes: string; nonNegotiable: boolean; }
-// A hotel row
+// A single row in a place category — now includes reservation field
+interface PlaceRow { name: string; reservation: string; notes: string; nonNegotiable: boolean; }
+// Pending panel change proposed by AI
+interface PendingChange {
+  id: string;
+  type: 'add' | 'remove' | 'resolve-url';
+  category: 'restaurants' | 'cafes' | 'bars' | 'activities' | 'niceToHaves';
+  item: PlaceItem;
+  originalUrl?: string; // for resolve-url type
+}
 interface HotelRow { name: string; neighborhood: string; }
-
-interface PlaceItem { name: string; notes?: string; nonNegotiable?: boolean; isLink?: boolean; }
+interface PlaceItem { name: string; reservation?: string; notes?: string; nonNegotiable?: boolean; isLink?: boolean; pending?: 'add' | 'remove'; }
 interface TripData {
   destination: string; arrival: string; departure: string;
   hotels: HotelRow[];
   pace: string; budget: string[];
   restaurants: PlaceItem[]; cafes: PlaceItem[];
   bars: PlaceItem[]; activities: PlaceItem[]; niceToHaves: PlaceItem[];
-  reservations: string[]; notes: string;
+  notes: string;
 }
 
 const LOADING_PHASES = [
@@ -35,7 +41,7 @@ const LOADING_PHASES = [
 ];
 
 function emptyRows(n: number): PlaceRow[] {
-  return Array.from({ length: n }, () => ({ name: '', notes: '', nonNegotiable: false }));
+  return Array.from({ length: n }, () => ({ name: '', reservation: '', notes: '', nonNegotiable: false }));
 }
 
 function countItineraryDays(text: string): number {
@@ -53,61 +59,131 @@ function calcRequiredDayCount(arrivalDate: string, departureDate: string): numbe
 function useAutoExpand(rows: PlaceRow[], setRows: (r: PlaceRow[]) => void) {
   useEffect(() => {
     const last = rows[rows.length - 1];
-    if (last && (last.name.trim() || last.notes.trim())) {
-      setRows([...rows, { name: '', notes: '', nonNegotiable: false }]);
+    if (last && (last.name.trim() || last.reservation.trim() || last.notes.trim())) {
+      setRows([...rows, { name: '', reservation: '', notes: '', nonNegotiable: false }]);
     }
   }, [rows, setRows]);
 }
 
+// Place category with 4 columns: Name | Reservation (text + calendar icon) | Notes | ★
 function PlaceCategory({
-  label, rows, setRows, namePlaceholder, notesPlaceholder, showCheckbox = true,
+  label, rows, setRows, notesPlaceholder,
 }: {
-  label: string; rows: PlaceRow[]; setRows: (r: PlaceRow[]) => void;
-  namePlaceholder?: string; notesPlaceholder?: string; showCheckbox?: boolean;
+  label: string; rows: PlaceRow[]; setRows: (r: PlaceRow[]) => void; notesPlaceholder?: string;
 }) {
   useAutoExpand(rows, setRows);
+  const reservationRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const update = (i: number, field: keyof PlaceRow, value: string | boolean) => {
-    const updated = rows.map((r, idx) => idx === i ? { ...r, [field]: value } : r);
-    setRows(updated);
+    setRows(rows.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
   };
 
-  const S = {
-    input: { flex: 1, backgroundColor: 'var(--color-cream)', border: '1px solid var(--color-border)', padding: '8px 11px', fontFamily: 'var(--font-body)', fontSize: '0.82rem', color: 'var(--color-ink)', fontWeight: 300, outline: 'none', lineHeight: 1.5, minWidth: 0 } as React.CSSProperties,
+  const openDatePicker = (i: number) => {
+    // Create a temporary invisible datetime-local input to trigger native picker
+    const tmp = document.createElement('input');
+    tmp.type = 'datetime-local';
+    tmp.style.position = 'fixed';
+    tmp.style.opacity = '0';
+    tmp.style.pointerEvents = 'none';
+    document.body.appendChild(tmp);
+    tmp.addEventListener('change', () => {
+      if (tmp.value) {
+        // Convert "2025-03-04T20:00" → "March 4 at 8:00pm"
+        const dt = new Date(tmp.value);
+        const formatted = dt.toLocaleString('en-US', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        update(i, 'reservation', formatted);
+      }
+      document.body.removeChild(tmp);
+    });
+    tmp.showPicker?.();
+    if (!tmp.showPicker) tmp.click();
   };
+
+  const borderL = '1px solid var(--color-border-light)';
+  const cellStyle = (extraLeft = false, extraRight = false): React.CSSProperties => ({
+    backgroundColor: 'var(--color-cream)',
+    border: '1px solid var(--color-border)',
+    borderTop: 'none',
+    borderRight: extraRight ? '1px solid var(--color-border)' : 'none',
+    borderLeft: extraLeft ? borderL : 'none',
+    padding: '7px 10px',
+    fontFamily: 'var(--font-body)',
+    fontSize: '0.82rem',
+    color: 'var(--color-ink)',
+    fontWeight: 300,
+    outline: 'none',
+    lineHeight: 1.5,
+    minWidth: 0,
+    width: '100%',
+    boxSizing: 'border-box' as const,
+  });
+
+  const headerCell = (extraLeft = false): React.CSSProperties => ({
+    padding: '4px 10px',
+    fontSize: '0.55rem',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--color-mist)',
+    borderBottom: borderL,
+    borderLeft: extraLeft ? borderL : undefined,
+  });
 
   return (
-    <div style={{ marginBottom: '18px' }}>
+    <div style={{ marginBottom: '20px' }}>
       <p style={{ fontSize: '0.6rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '8px', fontWeight: 500 }}>{label}</p>
-      <div style={{ display: 'grid', gridTemplateColumns: showCheckbox ? '3fr 2fr 24px' : '3fr 2fr', gap: '0', borderTop: '1px solid var(--color-border-light)' }}>
+      <div style={{ border: '1px solid var(--color-border)', borderBottom: 'none' }}>
         {/* Column headers */}
-        <div style={{ padding: '4px 11px', fontSize: '0.56rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', borderBottom: '1px solid var(--color-border-light)' }}>Place</div>
-        <div style={{ padding: '4px 11px', fontSize: '0.56rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', borderBottom: '1px solid var(--color-border-light)', borderLeft: '1px solid var(--color-border-light)' }}>Notes</div>
-        {showCheckbox && <div style={{ padding: '4px 6px', fontSize: '0.56rem', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-mist)', borderBottom: '1px solid var(--color-border-light)', borderLeft: '1px solid var(--color-border-light)', textAlign: 'center' }}>★</div>}
-
+        <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 2fr 2fr 28px', borderBottom: borderL }}>
+          <div style={headerCell()}>Place</div>
+          <div style={headerCell(true)}>Reservation</div>
+          <div style={headerCell(true)}>Notes</div>
+          <div style={{ ...headerCell(true), textAlign: 'center', padding: '4px 6px' }}>★</div>
+        </div>
+        {/* Rows */}
         {rows.map((row, i) => (
-          <div key={i} style={{ display: 'contents' }}>
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '2.5fr 2fr 2fr 28px', borderBottom: borderL }}>
+            {/* Name */}
             <input
               value={row.name}
               onChange={e => update(i, 'name', e.target.value)}
-              placeholder={namePlaceholder || 'Place name'}
-              style={{ ...S.input, borderTop: 'none', borderRight: 'none', borderBottom: '1px solid var(--color-border-light)' }}
+              placeholder="Place name"
+              style={cellStyle()}
             />
+            {/* Reservation — text input + calendar icon */}
+            <div style={{ position: 'relative', display: 'flex', borderLeft: borderL }}>
+              <input
+                ref={el => { reservationRefs.current[i] = el; }}
+                value={row.reservation}
+                onChange={e => update(i, 'reservation', e.target.value)}
+                placeholder="e.g. Tue Mar 4 at 8pm"
+                style={{ ...cellStyle(), borderLeft: 'none', borderRight: 'none', paddingRight: '28px', flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => openDatePicker(i)}
+                title="Pick date & time"
+                style={{ position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px', color: 'var(--color-mist)', display: 'flex', alignItems: 'center' }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+              </button>
+            </div>
+            {/* Notes */}
             <input
               value={row.notes}
               onChange={e => update(i, 'notes', e.target.value)}
-              placeholder={notesPlaceholder || ''}
-              style={{ ...S.input, borderTop: 'none', borderRight: 'none', borderLeft: '1px solid var(--color-border-light)', borderBottom: '1px solid var(--color-border-light)' }}
+              placeholder={notesPlaceholder || 'Neighborhood, wait time...'}
+              style={cellStyle(true)}
             />
-            {showCheckbox && (
-              <div
-                onClick={() => update(i, 'nonNegotiable', !row.nonNegotiable)}
-                title="Non-negotiable"
-                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderLeft: '1px solid var(--color-border-light)', borderBottom: '1px solid var(--color-border-light)', backgroundColor: row.nonNegotiable ? 'var(--color-accent)' : 'transparent', transition: 'background 0.15s' }}
-              >
-                <span style={{ fontSize: '0.65rem', color: row.nonNegotiable ? 'white' : 'var(--color-border)', userSelect: 'none' }}>★</span>
-              </div>
-            )}
+            {/* Star */}
+            <div
+              onClick={() => update(i, 'nonNegotiable', !row.nonNegotiable)}
+              title="Non-negotiable"
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', borderLeft: borderL, backgroundColor: row.nonNegotiable ? 'var(--color-accent)' : 'transparent', transition: 'background 0.15s' }}
+            >
+              <span style={{ fontSize: '0.65rem', color: row.nonNegotiable ? 'white' : 'var(--color-border)', userSelect: 'none' }}>★</span>
+            </div>
           </div>
         ))}
       </div>
@@ -128,22 +204,22 @@ function HotelInput({ hotels, setHotels }: { hotels: HotelRow[]; setHotels: (h: 
     setHotels(hotels.map((h, idx) => idx === i ? { ...h, [field]: value } : h));
   };
 
-  const S = { input: { flex: 1, backgroundColor: 'var(--color-cream)', border: '1px solid var(--color-border)', padding: '8px 11px', fontFamily: 'var(--font-body)', fontSize: '0.82rem', color: 'var(--color-ink)', fontWeight: 300, outline: 'none', lineHeight: 1.5, minWidth: 0 } as React.CSSProperties };
+  const borderL = '1px solid var(--color-border-light)';
 
   return (
     <div style={{ marginBottom: '24px' }}>
       <p style={{ fontSize: '0.6rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '8px', fontWeight: 500 }}>Hotel</p>
-      <div style={{ borderTop: '1px solid var(--color-border-light)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr' }}>
-          <div style={{ padding: '4px 11px', fontSize: '0.56rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', borderBottom: '1px solid var(--color-border-light)' }}>Hotel Name</div>
-          <div style={{ padding: '4px 11px', fontSize: '0.56rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', borderBottom: '1px solid var(--color-border-light)', borderLeft: '1px solid var(--color-border-light)' }}>Neighborhood</div>
-          {hotels.map((h, i) => (
-            <div key={i} style={{ display: 'contents' }}>
-              <input value={h.name} onChange={e => update(i, 'name', e.target.value)} placeholder="Hotel name" style={{ ...S.input, borderTop: 'none', borderRight: 'none', borderBottom: '1px solid var(--color-border-light)' }} />
-              <input value={h.neighborhood} onChange={e => update(i, 'neighborhood', e.target.value)} placeholder="Neighborhood" style={{ ...S.input, borderTop: 'none', borderRight: 'none', borderLeft: '1px solid var(--color-border-light)', borderBottom: '1px solid var(--color-border-light)' }} />
-            </div>
-          ))}
+      <div style={{ border: '1px solid var(--color-border)', borderBottom: 'none' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', borderBottom: borderL }}>
+          <div style={{ padding: '4px 10px', fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--color-mist)' }}>Hotel Name</div>
+          <div style={{ padding: '4px 10px', fontSize: '0.55rem', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'var(--color-mist)', borderLeft: borderL }}>Neighborhood</div>
         </div>
+        {hotels.map((h, i) => (
+          <div key={i} style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', borderBottom: borderL }}>
+            <input value={h.name} onChange={e => update(i, 'name', e.target.value)} placeholder="Hotel name" style={{ backgroundColor: 'var(--color-cream)', border: 'none', padding: '7px 10px', fontFamily: 'var(--font-body)', fontSize: '0.82rem', color: 'var(--color-ink)', fontWeight: 300, outline: 'none', width: '100%', boxSizing: 'border-box' as const }} />
+            <input value={h.neighborhood} onChange={e => update(i, 'neighborhood', e.target.value)} placeholder="Neighborhood" style={{ backgroundColor: 'var(--color-cream)', borderLeft: borderL, borderTop: 'none', borderRight: 'none', borderBottom: 'none', padding: '7px 10px', fontFamily: 'var(--font-body)', fontSize: '0.82rem', color: 'var(--color-ink)', fontWeight: 300, outline: 'none', width: '100%', boxSizing: 'border-box' as const }} />
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -158,6 +234,7 @@ export default function Home() {
   const [refinementCount, setRefinementCount] = useState(0);
   const [hasFullItinerary, setHasFullItinerary] = useState(false);
   const [tripData, setTripData] = useState<TripData | null>(null);
+  const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [dayAssignments, setDayAssignments] = useState<Record<string, string>>({});
   const [fullItineraryContent, setFullItineraryContent] = useState<string>('');
@@ -177,7 +254,6 @@ export default function Home() {
   const [bars, setBars] = useState<PlaceRow[]>(emptyRows(3));
   const [activities, setActivities] = useState<PlaceRow[]>(emptyRows(3));
   const [niceToHaves, setNiceToHaves] = useState<PlaceRow[]>(emptyRows(3));
-  const [reservations, setReservations] = useState('');
   const [pace, setPace] = useState('Balanced');
   const [budget, setBudget] = useState<string[]>(['Mid-range']);
   const [notes, setNotes] = useState('');
@@ -195,7 +271,6 @@ export default function Home() {
     }
   }, [messages]);
 
-  // Advance loading phases with realistic timing
   const startLoadingPhases = useCallback(() => {
     setLoadingPhase(0);
     let phase = 0;
@@ -228,6 +303,7 @@ export default function Home() {
   const rowsToItems = (rows: PlaceRow[]): PlaceItem[] =>
     rows.filter(r => r.name.trim()).map(r => ({
       name: r.name.trim(),
+      reservation: r.reservation.trim() || undefined,
       notes: r.notes.trim() || undefined,
       nonNegotiable: r.nonNegotiable,
     }));
@@ -236,6 +312,7 @@ export default function Home() {
     if (items.length === 0) return 'None';
     return items.map(p => {
       let s = p.name;
+      if (p.reservation) s += ` [reservation: ${p.reservation}]`;
       if (p.notes) s += ` [${p.notes}]`;
       if (p.nonNegotiable) s += ' [NON-NEGOTIABLE]';
       return s;
@@ -244,12 +321,11 @@ export default function Home() {
 
   const buildTripText = () => {
     const hotelText = hotels.filter(h => h.name.trim()).map(h => `${h.name}${h.neighborhood ? ', ' + h.neighborhood : ''}`).join(' / ') || 'None';
-
     return `Here are my trip details:
 
 Destination: ${destination}
-Arrival: ${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}
-Departure: ${departureDate}${departureTime ? ' at ' + departureTime : ''}
+Flight Arrival Time: ${arrivalDate}${arrivalTime ? ' at ' + arrivalTime : ''}
+Flight Departure Time: ${departureDate}${departureTime ? ' at ' + departureTime : ''}
 Hotel(s): ${hotelText}
 Preferred pace: ${pace}
 Budget level: ${budget.join(' & ')}
@@ -270,7 +346,6 @@ ${formatPlacesForAI(rowsToItems(activities))}
 Nice to Haves:
 ${formatPlacesForAI(rowsToItems(niceToHaves))}
 
-Confirmed Reservations: ${reservations || 'None'}
 Additional Notes: ${notes || 'None'}`;
   };
 
@@ -306,6 +381,65 @@ Additional Notes: ${notes || 'None'}`;
     return fullContent;
   };
 
+  // Parse AI response for proposed additions/removals and URL resolutions
+  const parseAIChanges = (content: string, currentTripData: TripData | null): PendingChange[] => {
+    if (!currentTripData) return [];
+    const changes: PendingChange[] = [];
+
+    // Detect URL resolutions: "I've identified [URL] as [Place Name]"
+    const urlResolvePattern = /identified\s+(https?:\/\/\S+)\s+as\s+([^.\n,]+)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = urlResolvePattern.exec(content)) !== null) {
+      const cats: Array<keyof Pick<TripData, 'restaurants'|'cafes'|'bars'|'activities'|'niceToHaves'>> = ['restaurants','cafes','bars','activities','niceToHaves'];
+      for (const cat of cats) {
+        const found = currentTripData[cat].find(p => p.name === m![1] || p.isLink);
+        if (found) {
+          changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: m![2].trim() }, originalUrl: m![1] });
+        }
+      }
+    }
+
+    // Detect proposed additions: "ADD_PROPOSAL: [category] | [name] | [reservation] | [notes]"
+    const addPattern = /ADD_PROPOSAL:\s*(\w+)\s*\|\s*([^|]+)\s*\|?\s*([^|]*)\s*\|?\s*([^\n]*)/gi;
+    while ((m = addPattern.exec(content)) !== null) {
+      const cat = m[1].toLowerCase() as PendingChange['category'];
+      if (['restaurants','cafes','bars','activities','niceToHaves'].includes(cat)) {
+        changes.push({ id: `add-${Date.now()}-${Math.random()}`, type: 'add', category: cat, item: { name: m[2].trim(), reservation: m[3]?.trim() || undefined, notes: m[4]?.trim() || undefined } });
+      }
+    }
+
+    // Detect proposed removals: "REMOVE_PROPOSAL: [category] | [name]"
+    const removePattern = /REMOVE_PROPOSAL:\s*(\w+)\s*\|\s*([^\n]+)/gi;
+    while ((m = removePattern.exec(content)) !== null) {
+      const cat = m[1].toLowerCase() as PendingChange['category'];
+      if (['restaurants','cafes','bars','activities','niceToHaves'].includes(cat)) {
+        changes.push({ id: `remove-${Date.now()}-${Math.random()}`, type: 'remove', category: cat, item: { name: m[2].trim() } });
+      }
+    }
+
+    return changes;
+  };
+
+  const confirmChange = (change: PendingChange) => {
+    if (!tripData) return;
+    const updated = { ...tripData, [change.category]: [...tripData[change.category]] };
+    if (change.type === 'add') {
+      updated[change.category] = [...updated[change.category], change.item];
+    } else if (change.type === 'remove') {
+      updated[change.category] = updated[change.category].filter(p => p.name !== change.item.name);
+    } else if (change.type === 'resolve-url') {
+      updated[change.category] = updated[change.category].map(p =>
+        (p.name === change.originalUrl || p.isLink) ? { ...p, name: change.item.name, isLink: false } : p
+      );
+    }
+    setTripData(updated);
+    setPendingChanges(prev => prev.filter(c => c.id !== change.id));
+  };
+
+  const rejectChange = (id: string) => {
+    setPendingChanges(prev => prev.filter(c => c.id !== id));
+  };
+
   const handleFormSubmit = async () => {
     if (!destination || !arrivalDate || !departureDate) return;
     setIsLoading(true);
@@ -325,7 +459,6 @@ Additional Notes: ${notes || 'None'}`;
       bars: rowsToItems(bars),
       activities: rowsToItems(activities),
       niceToHaves: rowsToItems(niceToHaves),
-      reservations: reservations.split('\n').map(s => s.trim()).filter(Boolean),
       notes,
     };
     setTripData(td);
@@ -334,6 +467,8 @@ Additional Notes: ${notes || 'None'}`;
     const content = await callAPI(initialMessages, 0, 'clarify', td);
     stopLoadingPhases();
     setMessages([...initialMessages, { role: 'assistant', content }]);
+    const newChanges = parseAIChanges(content, td);
+    if (newChanges.length > 0) setPendingChanges(prev => [...prev, ...newChanges]);
     setIsLoading(false);
   };
 
@@ -347,18 +482,10 @@ Additional Notes: ${notes || 'None'}`;
       activities: [...tripData.activities],
       niceToHaves: [...tripData.niceToHaves],
     };
-
     const arrMatch = userMessage.match(/arrival.*?(\w+\s+\d+|\d+[\/\-]\d+)/i);
     const depMatch = userMessage.match(/departure.*?(\w+\s+\d+|\d+[\/\-]\d+)/i);
     if (arrMatch) updated.arrival = arrMatch[1];
     if (depMatch) updated.departure = depMatch[1];
-
-    const addMatch = userMessage.match(/(?:add|also add|include|I want to add|I'd like to add)\s+([A-Z][^,.\n]{2,50})/i);
-    if (addMatch) {
-      const newPlace = addMatch[1].replace(/\s+to(?:\s+my\s+list)?\s*$/i, '').trim();
-      updated.restaurants = [...updated.restaurants, { name: newPlace }];
-    }
-
     return updated;
   };
 
@@ -369,9 +496,8 @@ Additional Notes: ${notes || 'None'}`;
     setIsLoading(true);
 
     const isRefinement = appStage === 'itinerary' && hasFullItinerary;
-    const currentCount = refinementCount; // do NOT pre-increment
+    const currentCount = refinementCount;
 
-    // Only enforce cap when hasFullItinerary is true
     if (hasFullItinerary && currentCount >= MAX_REFINEMENTS) {
       setMessages(prev => [...prev,
         { role: 'user', content: userMessage },
@@ -381,11 +507,8 @@ Additional Notes: ${notes || 'None'}`;
       return;
     }
 
-    if (isRefinement) {
-      startLoadingPhases();
-    }
+    if (isRefinement) startLoadingPhases();
 
-    // A) Compute updatedTripData first, then derive requiredDayCount from it
     const updatedTripData = updateTripDataFromChat(userMessage) ?? tripData;
     if (updatedTripData) setTripData(updatedTripData);
 
@@ -405,11 +528,9 @@ Additional Notes: ${notes || 'None'}`;
 
     const content = await callAPI(newMessages, currentCount, appStage, updatedTripData);
     stopLoadingPhases();
-    const updatedMsgs: Message[] = [...newMessages, { role: 'assistant', content }];
-    setMessages(updatedMsgs);
+    setMessages([...newMessages, { role: 'assistant', content }]);
     setIsLoading(false);
 
-    // B) Harden full itinerary detection — city header + correct day count
     const dayCount = countItineraryDays(content);
     const hasCityHeader = content.trimStart().startsWith('# ');
     const looksLikeFullItinerary = hasCityHeader && dayCount >= requiredDayCount;
@@ -418,12 +539,11 @@ Additional Notes: ${notes || 'None'}`;
       setHasFullItinerary(true);
     }
 
-    // Only update refinementCount when AI confirms "Refinement X of 8 applied"
     const refinementConfirm = content.match(/Refinement\s+(\d+)\s+of\s+8\s+applied/i);
-    if (refinementConfirm) {
-      const confirmedCount = parseInt(refinementConfirm[1], 10);
-      setRefinementCount(confirmedCount);
-    }
+    if (refinementConfirm) setRefinementCount(parseInt(refinementConfirm[1], 10));
+
+    const newChanges = parseAIChanges(content, updatedTripData);
+    if (newChanges.length > 0) setPendingChanges(prev => [...prev, ...newChanges]);
   };
 
   const handleViewFullItinerary = () => {
@@ -454,20 +574,47 @@ Additional Notes: ${notes || 'None'}`;
 
   const renderPlaceList = (items: PlaceItem[], label: string) => {
     if (!items || items.length === 0) return null;
+    const cat = label.toLowerCase().replace(/\s+/g, '') as PendingChange['category'];
+    const pending = pendingChanges.filter(c => c.category === cat);
     return (
       <div style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid var(--color-border-light)' }}>
         <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>{label}</p>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
           {items.map((item, i) => {
             const dayTag = getDayForPlace(item.name);
+            const isRemoving = pendingChanges.some(c => c.type === 'remove' && c.item.name === item.name);
             return (
-              <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
+              <li key={i} style={{ fontSize: '0.75rem', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px' }}>
                 <span style={{ position: 'absolute', left: 0, color: item.nonNegotiable ? 'var(--color-accent)' : 'var(--color-mist)', fontSize: '0.65rem' }}>{item.nonNegotiable ? '★' : '—'}</span>
-                <span>{item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name}</span>
+                <span style={{ color: isRemoving ? '#c0392b' : 'var(--color-steel)', textDecoration: isRemoving ? 'line-through' : 'none' }}>
+                  {item.isLink ? <em style={{ color: 'var(--color-mist)', fontStyle: 'italic' }}>Link — pending clarification</em> : item.name}
+                </span>
+                {item.reservation && <span style={{ marginLeft: '5px', fontSize: '0.65rem', color: 'var(--color-accent)' }}>· {item.reservation}</span>}
                 {dayTag && <span style={{ marginLeft: '6px', fontSize: '0.6rem', color: 'var(--color-accent)', fontWeight: 500 }}>{dayTag}</span>}
+                {isRemoving && (
+                  <span style={{ marginLeft: '8px' }}>
+                    {pendingChanges.filter(c => c.type === 'remove' && c.item.name === item.name).map(c => (
+                      <span key={c.id} style={{ display: 'inline-flex', gap: '4px' }}>
+                        <button onClick={() => confirmChange(c)} style={{ fontSize: '0.58rem', color: 'white', background: '#c0392b', border: 'none', cursor: 'pointer', padding: '1px 5px' }}>Remove</button>
+                        <button onClick={() => rejectChange(c.id)} style={{ fontSize: '0.58rem', color: 'var(--color-mist)', background: 'none', border: '1px solid var(--color-border)', cursor: 'pointer', padding: '1px 5px' }}>Keep</button>
+                      </span>
+                    ))}
+                  </span>
+                )}
               </li>
             );
           })}
+          {/* Pending additions for this category */}
+          {pending.filter(c => c.type === 'add').map(c => (
+            <li key={c.id} style={{ fontSize: '0.75rem', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '4px', opacity: 0.6 }}>
+              <span style={{ position: 'absolute', left: 0, color: 'var(--color-mist)', fontSize: '0.65rem' }}>+</span>
+              <span style={{ color: 'var(--color-steel)', fontStyle: 'italic' }}>{c.item.name}</span>
+              <span style={{ marginLeft: '8px', display: 'inline-flex', gap: '4px' }}>
+                <button onClick={() => confirmChange(c)} style={{ fontSize: '0.58rem', color: 'white', background: 'var(--color-accent)', border: 'none', cursor: 'pointer', padding: '1px 5px' }}>Add</button>
+                <button onClick={() => rejectChange(c.id)} style={{ fontSize: '0.58rem', color: 'var(--color-mist)', background: 'none', border: '1px solid var(--color-border)', cursor: 'pointer', padding: '1px 5px' }}>Dismiss</button>
+              </span>
+            </li>
+          ))}
         </ul>
       </div>
     );
@@ -577,15 +724,21 @@ Additional Notes: ${notes || 'None'}`;
 
                 <fieldset style={{ border: 'none', marginBottom: '32px' }}>
                   <legend style={S.sectionTitle}>Trip Details</legend>
-                  <div style={{ display: 'grid', gap: '10px' }}>
+                  <div style={{ display: 'grid', gap: '14px' }}>
                     <input value={destination} onChange={e => setDestination(e.target.value)} placeholder="Destination city" style={S.input} />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                      <input type="date" value={arrivalDate} onChange={e => setArrivalDate(e.target.value)} style={S.input} />
-                      <input type="time" value={arrivalTime} onChange={e => setArrivalTime(e.target.value)} style={S.input} />
+                    <div>
+                      <p style={{ fontSize: '0.6rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', marginBottom: '6px' }}>Flight Arrival Time</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <input type="date" value={arrivalDate} onChange={e => setArrivalDate(e.target.value)} style={S.input} />
+                        <input type="time" value={arrivalTime} onChange={e => setArrivalTime(e.target.value)} style={S.input} />
+                      </div>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                      <input type="date" value={departureDate} onChange={e => setDepartureDate(e.target.value)} style={S.input} />
-                      <input type="time" value={departureTime} onChange={e => setDepartureTime(e.target.value)} style={S.input} />
+                    <div>
+                      <p style={{ fontSize: '0.6rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', marginBottom: '6px' }}>Flight Departure Time</p>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                        <input type="date" value={departureDate} onChange={e => setDepartureDate(e.target.value)} style={S.input} />
+                        <input type="time" value={departureTime} onChange={e => setDepartureTime(e.target.value)} style={S.input} />
+                      </div>
                     </div>
                   </div>
                 </fieldset>
@@ -617,16 +770,11 @@ Additional Notes: ${notes || 'None'}`;
 
                 <fieldset style={{ border: 'none', marginBottom: '32px' }}>
                   <legend style={S.sectionTitle}>Saved Places</legend>
-                  <PlaceCategory label="Restaurants & Food" rows={restaurants} setRows={setRestaurants} notesPlaceholder="reservation day/time, wait time, neighborhood" />
-                  <PlaceCategory label="Cafes" rows={cafes} setRows={setCafes} notesPlaceholder="reservation day/time, wait time, neighborhood" />
-                  <PlaceCategory label="Bars & Nightlife" rows={bars} setRows={setBars} notesPlaceholder="reservation day/time, wait time, neighborhood" />
-                  <PlaceCategory label="Activities & Sights" rows={activities} setRows={setActivities} notesPlaceholder="reservation day/time" />
-                  <PlaceCategory label="Nice to Haves" rows={niceToHaves} setRows={setNiceToHaves} notesPlaceholder="reservation day/time" />
-                </fieldset>
-
-                <fieldset style={{ border: 'none', marginBottom: '32px' }}>
-                  <legend style={S.sectionTitle}>Confirmed Reservations</legend>
-                  <textarea value={reservations} onChange={e => setReservations(e.target.value)} placeholder="e.g. Pujol, Wednesday July 9 at 8:00pm" rows={2} style={{ ...S.input, resize: 'vertical' }} />
+                  <PlaceCategory label="Restaurants & Food" rows={restaurants} setRows={setRestaurants} notesPlaceholder="Neighborhood, wait time..." />
+                  <PlaceCategory label="Cafes" rows={cafes} setRows={setCafes} notesPlaceholder="Neighborhood, wait time..." />
+                  <PlaceCategory label="Bars & Nightlife" rows={bars} setRows={setBars} notesPlaceholder="Neighborhood, wait time..." />
+                  <PlaceCategory label="Activities & Sights" rows={activities} setRows={setActivities} notesPlaceholder="Neighborhood, duration..." />
+                  <PlaceCategory label="Nice to Haves" rows={niceToHaves} setRows={setNiceToHaves} notesPlaceholder="Neighborhood, notes..." />
                 </fieldset>
 
                 <fieldset style={{ border: 'none', marginBottom: '40px' }}>
@@ -659,7 +807,7 @@ Additional Notes: ${notes || 'None'}`;
                             <div key={i} className="animate-pulse-soft" style={{ width: '5px', height: '5px', borderRadius: '50%', backgroundColor: 'var(--color-accent)', animationDelay: `${i * 0.2}s` }} />
                           ))}
                         </div>
-                        {appStage === 'itinerary' && (
+                        {(appStage === 'itinerary' || (appStage === 'clarify' && hasFullItinerary === false && messages.length > 2)) && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {LOADING_PHASES.map((phase, i) => (
                               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', opacity: i <= loadingPhase ? 1 : 0.25, transition: 'opacity 0.4s ease' }}>
@@ -692,8 +840,8 @@ Additional Notes: ${notes || 'None'}`;
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {[
                     { label: 'Destination', value: tripData.destination },
-                    { label: 'Arrival', value: tripData.arrival },
-                    { label: 'Departure', value: tripData.departure },
+                    { label: 'Flight Arrival', value: tripData.arrival },
+                    { label: 'Flight Departure', value: tripData.departure },
                     { label: 'Hotel', value: tripData.hotels.map(h => h.name).join(' / ') },
                     { label: 'Pace', value: tripData.pace },
                     { label: 'Budget', value: tripData.budget.join(' & ') },
@@ -710,18 +858,6 @@ Additional Notes: ${notes || 'None'}`;
               {renderPlaceList(tripData.bars, 'Bars')}
               {renderPlaceList(tripData.activities, 'Activities')}
               {renderPlaceList(tripData.niceToHaves, 'Nice to Haves')}
-              {tripData.reservations.length > 0 && (
-                <div style={{ marginBottom: '14px', paddingBottom: '14px', borderBottom: '1px solid var(--color-border-light)' }}>
-                  <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>Reservations</p>
-                  <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                    {tripData.reservations.map((r, i) => (
-                      <li key={i} style={{ fontSize: '0.75rem', color: 'var(--color-steel)', lineHeight: 1.55, fontWeight: 300, paddingLeft: '0.9rem', position: 'relative', marginBottom: '3px' }}>
-                        <span style={{ position: 'absolute', left: 0, color: 'var(--color-accent)', fontSize: '0.7rem' }}>—</span>{r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
               {tripData.notes && (
                 <div>
                   <p style={{ fontSize: '0.56rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-accent)', marginBottom: '6px', fontWeight: 500 }}>Notes</p>
