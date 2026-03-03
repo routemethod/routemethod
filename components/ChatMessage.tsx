@@ -27,7 +27,7 @@ export default function ChatMessage({ message, onViewFullItinerary, hasFullItine
     const itineraryStart = message.content.indexOf('## Day');
     const cityHeaderStart = message.content.indexOf('# ');
     const start = cityHeaderStart > -1 && cityHeaderStart < itineraryStart ? cityHeaderStart : itineraryStart;
-    const beforeText = start > 0 ? message.content.slice(0, start).trim() : '';
+    const beforeText = start > 0 ? stripSignals(message.content.slice(0, start)) : '';
 
     const refinementMarker = 'This is your RouteMethod itinerary.';
     const questionsMarker = '**A few things before we finalize:**';
@@ -76,8 +76,19 @@ export default function ChatMessage({ message, onViewFullItinerary, hasFullItine
   );
 }
 
+function stripSignals(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => {
+      const t = line.trim();
+      return !t.startsWith('RESOLVED_URL:') && !t.startsWith('REMOVED:') && !t.startsWith('ADDED:');
+    })
+    .join('\n')
+    .trim();
+}
+
 function AssistantBubble({ content }: { content: string }) {
-  const html = renderMarkdown(content);
+  const html = renderMarkdown(stripSignals(content));
   return (
     <div style={{ display: 'flex', gap: '10px' }}>
       <div style={{ flexShrink: 0, width: '2px', backgroundColor: 'var(--color-accent)', marginTop: '4px', alignSelf: 'stretch', opacity: 0.4 }} />
