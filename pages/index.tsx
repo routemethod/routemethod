@@ -56,6 +56,65 @@ function calcRequiredDayCount(arrivalDate: string, departureDate: string): numbe
   return Math.max(1, diff + 1);
 }
 
+const MONTHS: Record<string, number> = {
+  jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
+  january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11
+};
+const MONTH_ABBR = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+
+function normalizeReservation(input: string): string {
+  if (!input.trim()) return input;
+  // Try to parse a date and time from freeform text
+  // Supported patterns: "Mar 4 at 8pm", "March 4 8:00pm", "3/4 8pm", "3/4/2025 20:00", "Feb 20 at 5:15pm"
+  const s = input.trim();
+
+  // Try native Date parse on common formats first
+  let date: Date | null = null;
+
+  // Pattern: month-name day at? time — "March 4 at 8pm", "Mar 4 8:00pm"
+  const namedMatch = s.match(/([a-zA-Z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (namedMatch) {
+    const mon = MONTHS[namedMatch[1].toLowerCase()];
+    if (mon !== undefined) {
+      const day = parseInt(namedMatch[2]);
+      let hour = parseInt(namedMatch[3]);
+      const min = parseInt(namedMatch[4] || '0');
+      const ampm = (namedMatch[5] || '').toLowerCase();
+      if (ampm === 'pm' && hour < 12) hour += 12;
+      if (ampm === 'am' && hour === 12) hour = 0;
+      date = new Date(2025, mon, day, hour, min);
+    }
+  }
+
+  // Pattern: m/d or m/d/yyyy at? time — "3/4 8pm", "3/4/2025 20:00"
+  if (!date) {
+    const slashMatch = s.match(/(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\s*(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+    if (slashMatch) {
+      const mon = parseInt(slashMatch[1]) - 1;
+      const day = parseInt(slashMatch[2]);
+      let hour = parseInt(slashMatch[3]);
+      const min = parseInt(slashMatch[4] || '0');
+      const ampm = (slashMatch[5] || '').toLowerCase();
+      if (ampm === 'pm' && hour < 12) hour += 12;
+      if (ampm === 'am' && hour === 12) hour = 0;
+      // Handle 24h: if no ampm and hour > 12, it's already 24h
+      date = new Date(2025, mon, day, hour, min);
+    }
+  }
+
+  if (!date || isNaN(date.getTime())) return input; // can't parse — leave as-is
+
+  const mon = MONTH_ABBR[date.getMonth()];
+  const day = date.getDate();
+  let hour = date.getHours();
+  const min = date.getMinutes();
+  const ampm = hour >= 12 ? 'pm' : 'am';
+  if (hour > 12) hour -= 12;
+  if (hour === 0) hour = 12;
+  const minStr = min === 0 ? '00' : min < 10 ? `0${min}` : `${min}`;
+  return `${mon} ${day} at ${hour}:${minStr}${ampm}`;
+}
+
 function useAutoExpand(rows: PlaceRow[], setRows: (r: PlaceRow[]) => void) {
   useEffect(() => {
     const last = rows[rows.length - 1];
@@ -88,10 +147,16 @@ function PlaceCategory({
     document.body.appendChild(tmp);
     tmp.addEventListener('change', () => {
       if (tmp.value) {
-        // Convert "2025-03-04T20:00" → "March 4 at 8:00pm"
         const dt = new Date(tmp.value);
-        const formatted = dt.toLocaleString('en-US', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-        update(i, 'reservation', formatted);
+        const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][dt.getMonth()];
+        const day = dt.getDate();
+        let hour = dt.getHours();
+        const min = dt.getMinutes();
+        const ampm = hour >= 12 ? 'pm' : 'am';
+        if (hour > 12) hour -= 12;
+        if (hour === 0) hour = 12;
+        const minStr = min === 0 ? '00' : min < 10 ? `0${min}` : `${min}`;
+        update(i, 'reservation', `${mon} ${day} at ${hour}:${minStr}${ampm}`);
       }
       document.body.removeChild(tmp);
     });
@@ -386,15 +451,18 @@ Additional Notes: ${notes || 'None'}`;
     if (!currentTripData) return [];
     const changes: PendingChange[] = [];
 
-    // Detect URL resolutions: "I've identified [URL] as [Place Name]"
-    const urlResolvePattern = /identified\s+(https?:\/\/\S+)\s+as\s+([^.\n,]+)/gi;
+    // Detect URL resolutions via signal: "RESOLVED_URL: [url] → [Place Name]"
+    const urlResolvePattern = /RESOLVED_URL:[\s]*(https?:\/\/[^\s]+)[\s]*→[\s]*([^\n]+)/gi;
     let m: RegExpExecArray | null;
     while ((m = urlResolvePattern.exec(content)) !== null) {
+      const originalUrl = m[1].trim();
+      const resolvedName = m[2].trim();
       const cats: Array<keyof Pick<TripData, 'restaurants'|'cafes'|'bars'|'activities'|'niceToHaves'>> = ['restaurants','cafes','bars','activities','niceToHaves'];
       for (const cat of cats) {
-        const found = currentTripData[cat].find(p => p.name === m![1] || p.isLink);
+        const found = currentTripData[cat].find(p => p.name === originalUrl || p.isLink);
         if (found) {
-          changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: m![2].trim() }, originalUrl: m![1] });
+          // URL resolutions apply automatically — no user confirmation needed
+          changes.push({ id: `resolve-${Date.now()}-${Math.random()}`, type: 'resolve-url', category: cat, item: { ...found, name: resolvedName, isLink: false }, originalUrl });
         }
       }
     }
@@ -532,7 +600,7 @@ Additional Notes: ${notes || 'None'}`;
     setIsLoading(false);
 
     const dayCount = countItineraryDays(content);
-    const hasCityHeader = content.trimStart().startsWith('# ');
+    const hasCityHeader = content.trimStart().startsWith('# ') || content.includes('\n# ');
     const looksLikeFullItinerary = hasCityHeader && dayCount >= requiredDayCount;
     if (!hasFullItinerary && looksLikeFullItinerary) {
       setAppStage('itinerary');
