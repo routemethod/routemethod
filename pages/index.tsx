@@ -48,6 +48,12 @@ function countItineraryDays(text: string): number {
   return (text.match(/## Day/g) || []).length;
 }
 
+function stripScratchpad(text: string): string {
+  const marker = '[BEGIN_ITINERARY]';
+  const idx = text.indexOf(marker);
+  return idx !== -1 ? text.slice(idx + marker.length).trim() : text;
+}
+
 function calcRequiredDayCount(arrivalDate: string, departureDate: string): number {
   if (!arrivalDate || !departureDate) return 1;
   const a = new Date(arrivalDate);
@@ -347,8 +353,9 @@ export default function Home() {
       setFullItineraryContent(latest.content);
       setDayAssignments(extractDayAssignments(latest.content));
       // Safety net: if a full itinerary exists in history but stage never advanced, fix it now
-      const dayCount = countItineraryDays(latest.content);
-      const hasCityHeader = latest.content.trimStart().startsWith('# ') || latest.content.includes('\n# ');
+      const visibleLatest = stripScratchpad(latest.content);
+      const dayCount = countItineraryDays(visibleLatest);
+      const hasCityHeader = visibleLatest.trimStart().startsWith('# ') || visibleLatest.includes('\n# ');
       const requiredDays = calcRequiredDayCount(arrivalDate, departureDate);
       if (!hasFullItinerary && hasCityHeader && dayCount >= requiredDays) {
         setHasFullItinerary(true);
@@ -658,8 +665,9 @@ Additional Notes: ${notes || 'None'}`;
     setMessages(withReply);
     setIsLoading(false);
 
-    const dayCount = countItineraryDays(content);
-    const hasCityHeader = content.trimStart().startsWith('# ') || content.includes('\n# ');
+    const visibleContent = stripScratchpad(content);
+    const dayCount = countItineraryDays(visibleContent);
+    const hasCityHeader = visibleContent.trimStart().startsWith('# ') || visibleContent.includes('\n# ');
     const looksLikeFullItinerary = hasCityHeader && dayCount >= requiredDayCount;
     if (!hasFullItinerary && looksLikeFullItinerary) {
       setAppStage('itinerary');
