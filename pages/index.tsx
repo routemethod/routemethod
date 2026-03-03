@@ -6,7 +6,7 @@ import { extractDayAssignments } from '../lib/markdown';
 
 interface Message { role: 'user' | 'assistant'; content: string; }
 type AppStage = 'landing' | 'input' | 'clarify' | 'itinerary';
-const MAX_REFINEMENTS = 10;
+const MAX_REFINEMENTS = 8;
 const PACE_OPTIONS = ['Relaxed', 'Balanced', 'Packed'];
 const BUDGET_OPTIONS = ['Budget', 'Mid-range', 'Luxury'];
 
@@ -36,6 +36,18 @@ const LOADING_PHASES = [
 
 function emptyRows(n: number): PlaceRow[] {
   return Array.from({ length: n }, () => ({ name: '', notes: '', nonNegotiable: false }));
+}
+
+function countItineraryDays(text: string): number {
+  return (text.match(/## Day/g) || []).length;
+}
+
+function calcRequiredDayCount(arrivalDate: string, departureDate: string): number {
+  if (!arrivalDate || !departureDate) return 1;
+  const a = new Date(arrivalDate);
+  const d = new Date(departureDate);
+  const diff = Math.round((d.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(1, diff + 1);
 }
 
 function useAutoExpand(rows: PlaceRow[], setRows: (r: PlaceRow[]) => void) {
@@ -144,6 +156,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingPhase, setLoadingPhase] = useState(0);
   const [refinementCount, setRefinementCount] = useState(0);
+  const [hasFullItinerary, setHasFullItinerary] = useState(false);
   const [tripData, setTripData] = useState<TripData | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [dayAssignments, setDayAssignments] = useState<Record<string, string>>({});
@@ -261,11 +274,17 @@ Confirmed Reservations: ${reservations || 'None'}
 Additional Notes: ${notes || 'None'}`;
   };
 
-  const callAPI = async (msgs: Message[], refinementsUsed?: number): Promise<string> => {
+  const callAPI = async (msgs: Message[], refinementsUsed?: number, currentStage?: string, currentTripData?: TripData | null): Promise<string> => {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: msgs, refinementsUsed, maxRefinements: MAX_REFINEMENTS }),
+      body: JSON.stringify({
+        messages: msgs,
+        appStage: currentStage,
+        refinementsUsed,
+        maxRefinements: MAX_REFINEMENTS,
+        tripData: currentTripData,
+      }),
     });
     const reader = response.body?.getReader();
     const decoder = new TextDecoder();
@@ -312,14 +331,14 @@ Additional Notes: ${notes || 'None'}`;
     setTripData(td);
 
     const initialMessages: Message[] = [{ role: 'user', content: buildTripText() }];
-    const content = await callAPI(initialMessages);
+    const content = await callAPI(initialMessages, 0, 'clarify', td);
     stopLoadingPhases();
     setMessages([...initialMessages, { role: 'assistant', content }]);
     setIsLoading(false);
   };
 
-  const updateTripDataFromChat = (userMessage: string) => {
-    if (!tripData) return;
+  const updateTripDataFromChat = (userMessage: string): TripData | null => {
+    if (!tripData) return null;
     const updated = {
       ...tripData,
       restaurants: [...tripData.restaurants],
@@ -334,13 +353,13 @@ Additional Notes: ${notes || 'None'}`;
     if (arrMatch) updated.arrival = arrMatch[1];
     if (depMatch) updated.departure = depMatch[1];
 
-    const addMatch = userMessage.match(/(?:add|also add|include|I want to add|I'd like to add)\s+([A-Z][^,\.\n]{2,50})/i);
+    const addMatch = userMessage.match(/(?:add|also add|include|I want to add|I'd like to add)\s+([A-Z][^,.\n]{2,50})/i);
     if (addMatch) {
       const newPlace = addMatch[1].replace(/\s+to(?:\s+my\s+list)?\s*$/i, '').trim();
       updated.restaurants = [...updated.restaurants, { name: newPlace }];
     }
 
-    setTripData(updated);
+    return updated;
   };
 
   const sendChatMessage = async () => {
@@ -349,36 +368,61 @@ Additional Notes: ${notes || 'None'}`;
     setChatInput('');
     setIsLoading(true);
 
-    const isRefinement = appStage === 'itinerary';
-    let currentCount = refinementCount;
+    const isRefinement = appStage === 'itinerary' && hasFullItinerary;
+    const currentCount = refinementCount; // do NOT pre-increment
+
+    // Only enforce cap when hasFullItinerary is true
+    if (hasFullItinerary && currentCount >= MAX_REFINEMENTS) {
+      setMessages(prev => [...prev,
+        { role: 'user', content: userMessage },
+        { role: 'assistant', content: "You have reached the refinement limit for this itinerary. Your final plan is ready to export." }
+      ]);
+      setIsLoading(false);
+      return;
+    }
 
     if (isRefinement) {
-      currentCount = refinementCount + 1;
-      setRefinementCount(currentCount);
-      if (currentCount > MAX_REFINEMENTS) {
-        setMessages(prev => [...prev,
-          { role: 'user', content: userMessage },
-          { role: 'assistant', content: "You have reached the refinement limit for this itinerary. Your final plan is ready to export." }
-        ]);
-        setIsLoading(false);
-        return;
-      }
       startLoadingPhases();
     }
 
-    updateTripDataFromChat(userMessage);
+    // A) Compute updatedTripData first, then derive requiredDayCount from it
+    const updatedTripData = updateTripDataFromChat(userMessage) ?? tripData;
+    if (updatedTripData) setTripData(updatedTripData);
+
+    let requiredDayCount: number;
+    if (updatedTripData?.arrival && updatedTripData?.departure) {
+      const aMatch = updatedTripData.arrival.match(/(\d{4}-\d{2}-\d{2})/);
+      const dMatch = updatedTripData.departure.match(/(\d{4}-\d{2}-\d{2})/);
+      requiredDayCount = (aMatch && dMatch)
+        ? calcRequiredDayCount(aMatch[1], dMatch[1])
+        : calcRequiredDayCount(arrivalDate, departureDate);
+    } else {
+      requiredDayCount = calcRequiredDayCount(arrivalDate, departureDate);
+    }
 
     const newMessages: Message[] = [...messages, { role: 'user', content: userMessage }];
     setMessages(newMessages);
 
-    const content = await callAPI(newMessages, currentCount);
+    const content = await callAPI(newMessages, currentCount, appStage, updatedTripData);
     stopLoadingPhases();
-    const updated: Message[] = [...newMessages, { role: 'assistant', content }];
-    setMessages(updated);
+    const updatedMsgs: Message[] = [...newMessages, { role: 'assistant', content }];
+    setMessages(updatedMsgs);
     setIsLoading(false);
 
-    if (content.includes('## Day') && appStage !== 'itinerary') {
+    // B) Harden full itinerary detection — city header + correct day count
+    const dayCount = countItineraryDays(content);
+    const hasCityHeader = content.trimStart().startsWith('# ');
+    const looksLikeFullItinerary = hasCityHeader && dayCount >= requiredDayCount;
+    if (!hasFullItinerary && looksLikeFullItinerary) {
       setAppStage('itinerary');
+      setHasFullItinerary(true);
+    }
+
+    // Only update refinementCount when AI confirms "Refinement X of 8 applied"
+    const refinementConfirm = content.match(/Refinement\s+(\d+)\s+of\s+8\s+applied/i);
+    if (refinementConfirm) {
+      const confirmedCount = parseInt(refinementConfirm[1], 10);
+      setRefinementCount(confirmedCount);
     }
   };
 
@@ -465,7 +509,7 @@ Additional Notes: ${notes || 'None'}`;
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px', justifySelf: 'end' }}>
               <Link href="/method" style={{ fontSize: '0.68rem', letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--color-mist)', textDecoration: 'none' }}>The Method</Link>
-              {appStage === 'itinerary' && (
+              {appStage === 'itinerary' && hasFullItinerary && (
                 <span style={{ fontSize: '0.62rem', color: 'var(--color-mist)' }}>
                   <span style={{ color: 'var(--color-accent)', fontFamily: 'var(--font-display)', fontSize: '0.9rem' }}>{refinementCount}</span>/{MAX_REFINEMENTS}
                 </span>
@@ -604,7 +648,7 @@ Additional Notes: ${notes || 'None'}`;
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
                   {messages.map((message, index) => (
-                    <ChatMessage key={index} message={message} onViewFullItinerary={handleViewFullItinerary} hasFullItinerary={!!fullItineraryContent} />
+                    <ChatMessage key={index} message={message} onViewFullItinerary={handleViewFullItinerary} hasFullItinerary={hasFullItinerary} />
                   ))}
                   {isLoading && (
                     <div className="animate-fade-in" style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', padding: '12px 0' }}>
@@ -692,7 +736,7 @@ Additional Notes: ${notes || 'None'}`;
         {(appStage === 'clarify' || appStage === 'itinerary') && (
           <div style={{ borderTop: '1px solid var(--color-border)', backgroundColor: 'var(--color-cream)', position: 'sticky', bottom: 0, zIndex: 10 }}>
             <div style={{ maxWidth: '680px', margin: '0 auto', padding: '14px 24px' }}>
-              {refinementCount >= MAX_REFINEMENTS ? (
+              {(hasFullItinerary && refinementCount >= MAX_REFINEMENTS) ? (
                 <p style={{ textAlign: 'center', fontSize: '0.68rem', color: 'var(--color-mist)', padding: '6px 0' }}>Your itinerary is complete. Export it to save.</p>
               ) : (
                 <>
