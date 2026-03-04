@@ -82,12 +82,23 @@ function stripSignals(text: string): string {
   const markerIdx = text.indexOf(beginMarker);
   const cleaned = markerIdx !== -1 ? text.slice(markerIdx + beginMarker.length) : text;
 
-  // Strip signal lines
+  // Strip scratchpad lines and signal lines
+  // Scratchpad lines: [STEP N —, CLEAN, BLOCKED, FLAG —, ROUTING VIOLATION, BACKTRACK VIOLATION,
+  // CAFE PLACEMENT VIOLATION, MEAL CONFLICT, NEIGHBORHOOD VIOLATION, AUDIT FAILURE
+  const scratchpadPrefixes = [
+    '[STEP ', 'CLEAN', 'BLOCKED', 'FLAG —', 'ROUTING VIOLATION', 'BACKTRACK VIOLATION',
+    'CAFE PLACEMENT VIOLATION', 'MEAL CONFLICT —', 'NEIGHBORHOOD VIOLATION —', 'AUDIT FAILURE —',
+  ];
+
   return cleaned
     .split('\n')
     .filter(line => {
       const t = line.trim();
-      return !t.startsWith('RESOLVED_URL:') && !t.startsWith('REMOVED:') && !t.startsWith('ADDED:') && t !== '[BEGIN_ITINERARY]';
+      if (!t) return true; // preserve blank lines
+      if (t.startsWith('RESOLVED_URL:') || t.startsWith('REMOVED:') || t.startsWith('ADDED:')) return false;
+      if (t === '[BEGIN_ITINERARY]') return false;
+      if (scratchpadPrefixes.some(p => t.startsWith(p))) return false;
+      return true;
     })
     .join('\n')
     .trim();
